@@ -1,6 +1,7 @@
 ** Equals old FAIR with recalibrated parameters for revised F2xco2 and Millar model.
 ** Deletes nonnegative reservoirs. See explanation below
 $eolcom #
+$onMultiR
 
 $setglobal initial_conditions 'preindustrial'
 $setglobal gas "co2"
@@ -142,6 +143,7 @@ EQUATIONS
         eq_catm             "Atmospheric carbon equation"
         eq_cumemi           "Total emitted carbon"
         eq_csinks           "Accumulated carbon in sinks equation"
+        eq_deltaconcco2     "Delta in concentration of co2"
         eq_deltaconcghg     "Delta in concentration of other GHGs"
         eq_concghg          "Concentration equation for other GHGs"
         eq_methoxi          "Methane oxidation equation"
@@ -168,13 +170,15 @@ eq_reslom(box,t+1)..   RES(box,t+1) =E=  ( emshare(box) * taubox(box) * ALPHA(t)
 *                                        sum(tt$(tt.val le t.val+1), emshare(box) * ( W_EMI('co2',tt) + EMO(tt) ) *
 *                                        exp( - tstep / ( taubox(box) * ALPHA(tt) ) ) ) );
 
-eq_catm(t)..                 C_ATM(t)  =E=  catmeq + sum(box, RES(box,t) * tstep );
+eq_catm(t)..                               C_ATM(t)  =E=  catmeq + sum(box, RES(box,t) * tstep );
     
-eq_cumemi(t+1)..           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) + EMO(t) )*tstep;
+eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) + EMO(t) )*tstep;
 
-eq_csinks(t)..             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catmeq );
+eq_csinks(t)..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catmeq );
     
 eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  C_ATM(t) * 1e18 / atmosphere_mass * ghg_mm('co2')  / atmosphere_mm;
+
+eq_deltaconcco2(t+1)$(active('co2'))..     DCONC('co2',t+1) =E= ( C_ATM(t+1) - C_ATM(t) ) * 1e18 / atmosphere_mass * ghg_mm('co2')  / atmosphere_mm  * tstep;
 
 ** Single box model for non-CO2 GHGs  
 eq_deltaconcghg(ghg,t)$(not sameas(ghg,'co2') and active(ghg))..   DCONC(ghg,t) =E= ( W_EMI(ghg,t) + natural_emissions(ghg,t) ) * 1e18 / atmosphere_mass * ghg_mm(ghg)  / atmosphere_mm  * tstep;
@@ -271,6 +275,7 @@ active(ghg) = no;
 
 $batinclude "run_historical.gms"
 
+
 * Initial conditions
 $ifthen.ic %initial_conditions%=="2020"
 CONC.FX(ghg,tfirst) = conc0(ghg);
@@ -281,6 +286,15 @@ TATM.FX(tfirst) = tatm0;
 TSLOW.fx(tfirst) = tslow0;
 TFAST.fx(tfirst) = tfast0;
 IRF.fx(tfirst) = irf0 + irC * (cumemi0 - (catm0-catmeq) ) * CO2toC + irT * tatm0;
+$elseif.ic %initial_conditions%=="historical_run"
+CONC.FX(ghg,tfirst) =  CONC.l(ghg,'271');
+CUMEMI.fx(tfirst) = CUMEMI.l('271');
+C_ATM.fx(tfirst) = C_ATM.l('271'); 
+RES.fx(box,tfirst) = RES.l(box,'271');
+TATM.FX(tfirst) = TATM.l(ghg,'271');
+TSLOW.fx(tfirst) = TSLOW.l(ghg,'271');
+TFAST.fx(tfirst) = TFAST.l(ghg,'271');
+IRF.fx(tfirst) = irf0 + irC * (CUMEMI.l('271') - (C_ATM.l('271')-catmeq) ) * CO2toC + irT * tatm0;
 $elseif.ic %initial_conditions%=="preindustrial"
 CONC.FX(ghg,tfirst) = preindustrial_conc(ghg);
 CUMEMI.fx(tfirst) = 0;

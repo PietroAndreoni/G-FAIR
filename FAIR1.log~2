@@ -1,5 +1,5 @@
 
---- Job FAIR.gms Start 12/04/23 15:40:36 40.4.0 d540b52e WEX-WEI x86 64bit/MS Windows
+--- Job FAIR.gms Start 12/04/23 16:14:23 40.4.0 d540b52e WEX-WEI x86 64bit/MS Windows
 --- Applying:
     C:\GAMS\40\gmsprmNT.txt
 --- GAMS Parameters defined
@@ -12,6 +12,8 @@
     ErrorLog 99
     IDE 1
     LstTitleLeftAligned 1
+    --experiment steadystate
+    --initial_conditions 2020
 Licensee: Medium MUD - 10 User License                   S220422|0002AO-WIN
           Fondazione CMCC, ECIP Division                            DC16179
           C:\GAMS\40\gamslice.txt
@@ -19,26 +21,26 @@ Licensee: Medium MUD - 10 User License                   S220422|0002AO-WIN
 Processor information: 1 socket(s), 4 core(s), and 8 thread(s) available
 GAMS 40.4.0   Copyright (C) 1987-2022 GAMS Development. All rights reserved
 --- Starting compilation
---- FAIR.gms(293) 3 Mb
+--- FAIR.gms(276) 3 Mb
 --- . run_historical.gms(8) 3 Mb
 --- GDXin=C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\input\data_historical_values.gdx
 --- GDX File ($gdxIn) C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\input\data_historical_values.gdx
 --- . run_historical.gms(43) 3 Mb
---- FAIR.gms(296) 3 Mb
---- . emissionpulse_co2.gms(20) 3 Mb
---- FAIR.gms(297) 3 Mb
---- Starting execution: elapsed 0:00:00.010
---- FAIR.gms(231) 4 Mb
+--- FAIR.gms(302) 3 Mb
+--- . steadystate_co2.gms(19) 3 Mb
+--- FAIR.gms(303) 3 Mb
+--- Starting execution: elapsed 0:00:00.011
+--- FAIR.gms(235) 4 Mb
 --- Generating CNS model solveqs
---- FAIR.gms(246) 6 Mb
+--- FAIR.gms(250) 6 Mb
 ---   2 rows  2 columns  4 non-zeroes
 ---   0 nl-code  0 nl-non-zeroes
 --- Range statistics (absolute non-zero finite values)
 --- RHS       [min, max] : [ 1.600E+00, 2.750E+00]
 --- Bound     [min, max] : [        NA,        NA]
 --- Matrix    [min, max] : [ 4.977E-01, 3.710E+00]
---- FAIR.gms(246) 4 Mb
---- Executing CONOPT (Solvelink=2): elapsed 0:00:00.014
+--- FAIR.gms(250) 4 Mb
+--- Executing CONOPT (Solvelink=2): elapsed 0:00:00.015
 
 CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
 
@@ -63,18 +65,18 @@ CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
  ** Feasible solution to a square system.
  
 --- Reading solution for model solveqs
---- Executing after solve: elapsed 0:00:00.038
---- FAIR.gms(266) 4 Mb
+--- Executing after solve: elapsed 0:00:00.041
+--- FAIR.gms(270) 4 Mb
 --- Generating NLP model constant_concentrations_ghg
---- FAIR.gms(267) 7 Mb
+--- FAIR.gms(271) 7 Mb
 ---   2,799 rows  3,204 columns  8,393 non-zeroes
 ---   4,802 nl-code  1,200 nl-non-zeroes
 --- Range statistics (absolute non-zero finite values)
 --- RHS       [min, max] : [        NA,        NA] - Zero values observed as well
 --- Bound     [min, max] : [ 1.000E-03, 7.220E+02]
 --- Matrix    [min, max] : [ 1.078E-01, 1.444E+03] - Zero values observed as well
---- FAIR.gms(267) 5 Mb
---- Executing CONOPT (Solvelink=2): elapsed 0:00:00.043
+--- FAIR.gms(271) 5 Mb
+--- Executing CONOPT (Solvelink=2): elapsed 0:00:00.046
 
 CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
 
@@ -124,18 +126,18 @@ CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
  ** Optimal solution. Reduced gradient less than tolerance.
  
 --- Reading solution for model constant_concentrations_ghg
---- Executing after solve: elapsed 0:00:00.163
---- FAIR.gms(320) 5 Mb
+--- Executing after solve: elapsed 0:00:00.155
+--- FAIR.gms(312) 5 Mb
 --- Generating NLP model fair
---- FAIR.gms(325) 9 Mb
----   8,391 rows  10,002 columns  31,954 non-zeroes
+--- FAIR.gms(317) 9 Mb
+---   8,790 rows  10,401 columns  33,151 non-zeroes
 ---   93,081 nl-code  13,976 nl-non-zeroes
 --- Range statistics (absolute non-zero finite values)
 --- RHS       [min, max] : [ 2.222E+00, 9.399E+02] - Zero values observed as well
 --- Bound     [min, max] : [ 3.407E-04, 9.399E+02] - Zero values observed as well
 --- Matrix    [min, max] : [ 1.421E-20, 2.812E+02] - Zero values observed as well
---- FAIR.gms(325) 7 Mb
---- Executing CONOPT (Solvelink=2): elapsed 0:00:00.192
+--- FAIR.gms(317) 7 Mb
+--- Executing CONOPT (Solvelink=2): elapsed 0:00:00.185
 
 CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
 
@@ -148,9 +150,9 @@ CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
  
  
    Iter Phase Ninf   Infeasibility   RGmax    NSB   Step InItr MX OK
-      0   0        8.8930327353E+05 (Input point)
+      0   0        8.8958132353E+05 (Input point)
  
-                   Pre-triangular equations:   8391
+                   Pre-triangular equations:   8790
                    Post-triangular equations:  0
  
       1   0        0.0000000000E+00 (After pre-processing)
@@ -165,20 +167,20 @@ CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
  ** Optimal solution. There are no superbasic variables.
  
 --- Reading solution for model fair
---- Executing after solve: elapsed 0:00:00.274
---- FAIR.gms(326) 7 Mb
+--- Executing after solve: elapsed 0:00:00.265
+--- FAIR.gms(318) 7 Mb
 --- GDX File (execute_unload) C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\historical.gdx
---- FAIR.gms(344) 7 Mb
+--- FAIR.gms(349) 7 Mb
 --- Generating NLP model fair
---- FAIR.gms(346) 10 Mb
----   6,793 rows  8,402 columns  27,162 non-zeroes
+--- FAIR.gms(351) 10 Mb
+---   8,790 rows  10,401 columns  33,151 non-zeroes
 ---   93,081 nl-code  13,976 nl-non-zeroes
 --- Range statistics (absolute non-zero finite values)
---- RHS       [min, max] : [ 3.240E+01, 9.399E+02] - Zero values observed as well
---- Bound     [min, max] : [ 1.000E-03, 9.399E+02] - Zero values observed as well
---- Matrix    [min, max] : [ 1.320E-20, 6.681E+01] - Zero values observed as well
---- FAIR.gms(346) 8 Mb
---- Executing CONOPT (Solvelink=2): elapsed 0:00:00.305
+--- RHS       [min, max] : [ 2.222E+00, 9.399E+02] - Zero values observed as well
+--- Bound     [min, max] : [ 1.000E-03, 1.706E+03] - Zero values observed as well
+--- Matrix    [min, max] : [ 1.320E-20, 1.658E+02] - Zero values observed as well
+--- FAIR.gms(351) 8 Mb
+--- Executing CONOPT (Solvelink=2): elapsed 0:00:00.299
 
 CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
 
@@ -191,25 +193,25 @@ CONOPT 3         40.4.0 d540b52e Oct 3, 2022           WEI x86 64bit/MS Window
  
  
    Iter Phase Ninf   Infeasibility   RGmax    NSB   Step InItr MX OK
-      0   0        3.3719507947E+03 (Input point)
+      0   0        1.0341454425E+04 (Input point)
  
-                   Pre-triangular equations:   6793
+                   Pre-triangular equations:   8790
                    Post-triangular equations:  0
  
       1   0        0.0000000000E+00 (After pre-processing)
       2   0        0.0000000000E+00 (After scaling)
  
- ** Feasible solution. Value of objective =    592.955724308
+ ** Feasible solution. Value of objective =    15.5734803545
  
    Iter Phase Ninf     Objective     RGmax    NSB   Step InItr MX OK
-      3   3        5.9295572431E+02 0.0E+00     0 0.0E+00    0 F  T
-      4   3        5.9295572431E+02 0.0E+00     0
+      3   3        1.5573480354E+01 0.0E+00     0 0.0E+00    0 F  T
+      4   3        1.5573480354E+01 0.0E+00     0
  
  ** Optimal solution. There are no superbasic variables.
  
 --- Reading solution for model fair
---- Executing after solve: elapsed 0:00:00.374
---- FAIR.gms(348) 8 Mb
---- GDX File (execute_unload) C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\emission_pulse_co2_icpreindustrial.gdx
+--- Executing after solve: elapsed 0:00:00.382
+--- FAIR.gms(353) 8 Mb
+--- GDX File (execute_unload) C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\steady_state_ic2020.gdx
 *** Status: Normal completion
---- Job FAIR.gms Stop 12/04/23 15:40:37 elapsed 0:00:00.382
+--- Job FAIR.gms Stop 12/04/23 16:14:24 elapsed 0:00:00.387

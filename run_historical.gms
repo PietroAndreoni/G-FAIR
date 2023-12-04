@@ -27,7 +27,7 @@ TFAST.fx(tfirst) = 0;
 IRF.fx(tfirst) = irf0;
 
 W_EMI.fx(ghg,t)= sum(t_hist,emi_hist(ghg,t_hist)$thisttot(t_hist,t)) ;
-FF_CH4.fx(t) = sum(t_hist,fossilch4_frac(t_hist)$thisttot(t_hist,t));
+*FF_CH4.fx(t)$(tfirst(t)) = sum(t_hist,fossilch4_frac(t_hist)$thisttot(t_hist,t));
 FF_CH4.fx(t) = 0;
 
 active(ghg) = yes;
