@@ -1,0 +1,30 @@
+
+--- Job run_historical.gms Start 12/04/23 15:00:23 40.4.0 d540b52e WEX-WEI x86 64bit/MS Windows
+--- Applying:
+    C:\GAMS\40\gmsprmNT.txt
+--- GAMS Parameters defined
+    Input "C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\run_historical.gms"
+    PageSize 0
+    ScrDir "C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\225a\"
+    SysDir C:\GAMS\40\
+    LogOption 3
+    ErrMsg 1
+    ErrorLog 99
+    IDE 1
+    LstTitleLeftAligned 1
+Licensee: Medium MUD - 10 User License                   S220422|0002AO-WIN
+          Fondazione CMCC, ECIP Division                            DC16179
+          C:\GAMS\40\gamslice.txt
+          License Admin: Nicola Sanavio, nicola.sanavio@unive.it           
+Processor information: 1 socket(s), 4 core(s), and 8 thread(s) available
+GAMS 40.4.0   Copyright (C) 1987-2022 GAMS Development. All rights reserved
+--- Starting compilation
+--- run_historical.gms(7) 3 Mb
+--- GDXin=C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\input\data_historical_values.gdx
+--- GDX File ($gdxIn) C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\input\data_historical_values.gdx
+--- run_historical.gms(15) 3 Mb 1 Error
+*** Error 116 in C:\Users\pietr\OneDrive - Politecnico di Milano\G-FAIR\run_historical.gms
+    Label is unknown
+--- run_historical.gms(17) 3 Mb 1 Error
+*** Status: Compilation error(s)
+--- Job run_historical.gms Stop 12/04/23 15:00:23 elapsed 0:00:00.010

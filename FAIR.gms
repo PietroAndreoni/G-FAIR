@@ -6,7 +6,7 @@ $setglobal initial_conditions 'preindustrial'
 $setglobal gas "co2"
 $setglobal experiment "emissionpulse"
 
-set t /1*200/;
+set t /1*400/;
 alias (t,tt);
 
 sets     tfirst(t), tlast(t);
@@ -212,7 +212,7 @@ eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 ** calculate alphas imposing IRF 
 eq_irflhs(t)..    IRF(t)    =E=  sum(box, ( ALPHA(t) * emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) ) );
 
-eq_irfrhs(t+1)..    IRF(t+1)    =E=  irf0 + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
+eq_irfrhs(t+1)..  IRF(t+1)    =E=  irf0 + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
 
 eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-tatm0) );
 
@@ -269,6 +269,8 @@ natural_emissions(ghg,t) = NATEMI.l(ghg);
 active(ghg) = no;
 *************** end natural emissions
 
+$batinclude "run_historical.gms"
+
 * Initial conditions
 $ifthen.ic %initial_conditions%=="2020"
 CONC.FX(ghg,tfirst) = conc0(ghg);
@@ -290,6 +292,7 @@ TFAST.fx(tfirst) = 0;
 IRF.fx(tfirst) = irf0;
 $endif.ic
 
+
 ***** run some experiments
-$batinclude "experiments/%experiment%_%gas%.gms"
+$if set experiment $batinclude "experiments/%experiment%_%gas%.gms"
 
