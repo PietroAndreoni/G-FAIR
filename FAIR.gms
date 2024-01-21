@@ -1,13 +1,13 @@
 ** Equals old FAIR with recalibrated parameters for revised F2xco2 and Millar model.
 ** Deletes nonnegative reservoirs. See explanation below
 $eolcom #
-$onMultiR
+$onMulti
 
-$setglobal initial_conditions 'preindustrial'
+$setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 $setglobal experiment "emissionpulse"
 
-set t /1*400/;
+set t /1*300/;
 alias (t,tt);
 
 sets     tfirst(t), tlast(t);
@@ -61,8 +61,9 @@ SCALARS
 PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"  
                    taubox(box)    "Decay time constant for reservoir *  (year)"
                    taughg(ghg)    "Decay time constant for ghg *  (year)"
-                   forcing_coeff(ghg) "Concentration to forcing for other green-house gases"
-                   natural_emissions(ghg,t) "Emissions from natural sources for non co2 gasses";
+                   forcing_coeff(ghg) "Concentration to forcing for other green-house gases [W/]"
+                   natural_emissions(ghg,t) "Emissions from natural sources for non co2 gasses"
+                   target_temp(t) "Target temperature";
 
 natural_emissions(ghg,t) = 0;
  
@@ -80,6 +81,8 @@ emshare("biosphere") = 0.2824;
 emshare("ocean mixed layer") = 0.2763;
 
 forcing_coeff(ghg) = 0;
+target_temp(t) = 0;
+
 ** INITIAL CONDITIONS TO BE CALIBRATED TO HISTORY
 ** CALIBRATION;
 
@@ -108,7 +111,7 @@ preindustrial_conc('n20') = 270.0;
 catmeq = preindustrial_conc('co2') * atmosphere_mass / 1e18 / ghg_mm('co2') * atmosphere_mm;
 catm0 = conc0('co2') * atmosphere_mass / 1e18 / ghg_mm('co2') * atmosphere_mm;
 res0(box) = emshare(box) * (catm0-catmeq);
-cumemi0 = 1700; #from 1750, source global carbon budget 2022
+cumemi0 = 1717.84; #from 1750, source global carbon budget 2022
 scaling_forc2x = ( -2.4e-7 * sqr( preindustrial_conc('co2') ) +  7.2e-4 * preindustrial_conc('co2') -  1.05e-4 * ( 2*preindustrial_conc('n20') ) + 5.36 ) * log( 2 ) / forc2x;
 
 VARIABLES
@@ -124,8 +127,8 @@ VARIABLES
         TSLOW(t)       "Increase temperature from slow response (degrees C from 1765)"
         TFAST(t)       "Increase temperature from fast response (degrees C from 1765)"
         CUMEMI(t)      "Total co2 emitted (GtCO2 from 1765)"
-        C_SINKS(t)        "Accumulated carbon in ocean and other sinks (GtCO2)"
-        C_ATM(t)        "Accumulated carbon in atmoshpere (GtCO2)"
+        C_SINKS(t)     "Accumulated carbon in ocean and other sinks (GtCO2)"
+        C_ATM(t)       "Accumulated carbon in atmoshpere (GtCO2)"
         IRF(t)         "IRF100 at time t"
         ALPHA(t)       "Carbon decay time scaling factor"
         OBJ;
@@ -158,17 +161,12 @@ EQUATIONS
         eq_irfrhs           "Right-hand side of IRF100 equation"
         eq_obj;
 
+$if set sai $batinclude "SAI.gms"
+
 ** Four box model for CO2 emission-to-concentrations (nordhaus formulation)
 eq_reslom(box,t+1)..   RES(box,t+1) =E=  ( emshare(box) * taubox(box) * ALPHA(t) * ( W_EMI('co2',t) + EMO(t) ) ) * 
                                         ( 1 - exp( - tstep / ( taubox(box) * ALPHA(t) ) ) ) + 
                                         RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) );
-
-
-** Four box model for CO2 emission-to-concentrations (own formulation)
-*eq_reslom(box,t+1)..   RES(box,t+1) =E=   exp( - tstep / ( taubox(box) * ALPHA(t+1) ) ) *
-*                                        ( RES(box,'1') / exp( - tstep / ( taubox(box) * ALPHA('1') ) ) +
-*                                        sum(tt$(tt.val le t.val+1), emshare(box) * ( W_EMI('co2',tt) + EMO(tt) ) *
-*                                        exp( - tstep / ( taubox(box) * ALPHA(tt) ) ) ) );
 
 eq_catm(t)..                               C_ATM(t)  =E=  catmeq + sum(box, RES(box,t) * tstep );
     
@@ -218,10 +216,12 @@ eq_irflhs(t)..    IRF(t)    =E=  sum(box, ( ALPHA(t) * emshare(box) * taubox(box
 
 eq_irfrhs(t+1)..  IRF(t+1)    =E=  irf0 + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
 
-eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-tatm0) );
+eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
 
 **  Upper and lower bounds for stability
-CONC.LO(ghg,t) = 1e-3;
+CONC.LO(cghg,t) = 1e-3;
+CONC.LO(oghg,t) = 0;
+TATM.LO(t)  = -10;
 TATM.UP(t)  = 20;
 alpha.up(t) = 100;
 alpha.lo(t) = 1e-2;
@@ -286,15 +286,17 @@ TATM.FX(tfirst) = tatm0;
 TSLOW.fx(tfirst) = tslow0;
 TFAST.fx(tfirst) = tfast0;
 IRF.fx(tfirst) = irf0 + irC * (cumemi0 - (catm0-catmeq) ) * CO2toC + irT * tatm0;
+target_temp(t) = tatm0;
 $elseif.ic %initial_conditions%=="historical_run"
 CONC.FX(ghg,tfirst) =  CONC.l(ghg,'271');
 CUMEMI.fx(tfirst) = CUMEMI.l('271');
 C_ATM.fx(tfirst) = C_ATM.l('271'); 
 RES.fx(box,tfirst) = RES.l(box,'271');
-TATM.FX(tfirst) = TATM.l(ghg,'271');
-TSLOW.fx(tfirst) = TSLOW.l(ghg,'271');
-TFAST.fx(tfirst) = TFAST.l(ghg,'271');
-IRF.fx(tfirst) = irf0 + irC * (CUMEMI.l('271') - (C_ATM.l('271')-catmeq) ) * CO2toC + irT * tatm0;
+TATM.FX(tfirst) = TATM.l('271');
+TSLOW.fx(tfirst) = TSLOW.l('271');
+TFAST.fx(tfirst) = TFAST.l('271');
+IRF.fx(tfirst) = irf0 + irC * (CUMEMI.l('271') - (C_ATM.l('271')-catmeq) ) * CO2toC + irT * TATM.l('271');
+target_temp(t) = TATM.l('271');
 $elseif.ic %initial_conditions%=="preindustrial"
 CONC.FX(ghg,tfirst) = preindustrial_conc(ghg);
 CUMEMI.fx(tfirst) = 0;
@@ -304,9 +306,16 @@ TATM.FX(tfirst) = 0;
 TSLOW.fx(tfirst) = 0;
 TFAST.fx(tfirst) = 0;
 IRF.fx(tfirst) = irf0;
+target_temp(t) = 0;
 $endif.ic
 
-
 ***** run some experiments
-$if set experiment $batinclude "experiments/%experiment%_%gas%.gms"
+$ifthen.exp set experiment 
 
+$if set sai active('sai') = yes;
+$batinclude "experiments/%experiment%_%gas%.gms"
+$if set sai W_EMI.up('sai',t) = +inf;
+solve fair using nlp minimizing OBJ;
+execute_unload "emission_pulse_%gas%_%initial_conditions%.gdx";
+
+$endif.exp
