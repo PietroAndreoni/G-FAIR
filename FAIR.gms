@@ -5,7 +5,7 @@ $onMulti
 
 $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
-$setglobal experiment "emissionpulse"
+*$setglobal experiment "emissionpulse"
 
 set t /1*600/;
 alias (t,tt);
@@ -48,16 +48,17 @@ SCALARS
         atmosphere_mass "Mass of atmosphere (kg)"                                     /5.1352e18/ 
         atmosphere_mm   "Molecular mass of atmosphere (kg mol-1)"                     /28.97/
         CO2toC          "CO2 to carbon conversion factor"                             /0.2727/
-        Tecs "equilbrium climate sensitivity (K)" /2.75/
-        Ttcr "Transient climate response (K)" /1.6/
-        forc2x "Forcing for 2xCO2 (Wm-2)" /3.71/
-        scaling_forc2x "Scaling factor for CO2 forcing to ensure consistency with user-specified 2xforcing" /1.0/
-        cumemi0   "Initial cumulative emissions in 2020 (GtCO2)"       /2322.833/
-        catm0     "Initial concentration in atmosphere in 2020 (GtCO2)"       /3250.547/
-        catmeq    "Equilibrium concentration atmosphere  (GtCO2)"            /2156/
-        tslow0    "Initial temperature box 1 change in 2020 (K from 1765)"  /0.1477  /
-        tfast0    "Initial temperature box 2 change in 2020 (K from 1765)"  /1.099454/
-        tatm0     "Initial atmospheric temperature change in 2020"          /1.24715 /;
+        Tecs            "equilbrium climate sensitivity (K)" /2.75/
+        Ttcr            "Transient climate response (K)" /1.6/
+        forc2x          "Forcing for 2xCO2 (Wm-2)" /3.71/
+        scaling_forc2x  "Scaling factor for CO2 forcing to ensure consistency with user-specified 2xforcing" /1.0/
+        emi0            "Yearly emissions in 2020 (GtCO2)"
+        cumemi0         "Initial cumulative emissions in 2020 (GtCO2)"      
+        catm0           "Initial concentration in atmosphere in 2020 (GtCO2)"       
+        catmeq          "Equilibrium concentration atmosphere  (GtCO2)"            
+        tslow0          "Initial temperature box 1 change in 2020 (K from 1765)"  /0.1477  /
+        tfast0          "Initial temperature box 2 change in 2020 (K from 1765)"  /1.099454/
+        tatm0           "Initial atmospheric temperature change in 2020"          /1.24715 /;
  
 PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"  
                    taubox(box)    "Decay time constant for reservoir *  (year)"
@@ -91,10 +92,11 @@ PARAMETER ghg_mm(*) "Molecular mass of greenhouse gases (kg mol-1)";
 ghg_mm('co2') = 44.01;
 ghg_mm('ch4') = 16.04;
 ghg_mm('n20') = 44.013;
+ghg_mm('c') = 12.01;
 
 PARAMETER emitoconc(*) "Conversion factor from emissions to concentration for greenhouse gas i (Gt to ppm/ Mt to ppb)";
 emitoconc(ghg) = 1e18 / atmosphere_mass * ghg_mm(ghg)  / atmosphere_mm;
-emitoconc('c') = 1e18 / atmosphere_mass * 12.01  / atmosphere_mm;
+emitoconc('c') = 1e18 / atmosphere_mass * ghg_mm('c')  / atmosphere_mm;
 
 PARAMETER res0(box)  "Initial concentration in Reservoir 0 in 2020 (GtCO2)";
         
@@ -111,7 +113,8 @@ preindustrial_conc('n20') = 270.0;
 catmeq = preindustrial_conc('co2') / emitoconc('co2');
 catm0 = conc0('co2') / emitoconc('co2'); 
 cumemi0 = 1717.8; #from 1750, source global carbon budget 2022
-res0(box) = emshare(box) * (catm0 - catmeq);
+emi0 = 37.1; #GtCO2 
+res0(box) = emshare(box) * (catm0-catmeq);
 scaling_forc2x = ( -2.4e-7 * sqr( preindustrial_conc('co2') ) +  7.2e-4 * preindustrial_conc('co2') -  1.05e-4 * ( 2*preindustrial_conc('n20') ) + 5.36 ) * log( 2 ) / forc2x;
 
 PARAMETER inertia(ghg);
@@ -123,15 +126,15 @@ VARIABLES
         CONC(ghg,t)    "Concentration of greenhouse gas i (ppm/ppb from 1765)"
         DCONC(ghg,t)   "Difference in concentration of non co2 greenhouse gases due to emissions at time t (ppm/ppb)"
         FORCING(ghg,t) "Increase in radiative forcing due to ghg i (watts per m2 from 1765)"
-        EMO(t)         "CO2 emissions from methane oxidation (GtCO2 per year)"
+        EMO(t)         "CO2 emissions from methane oxidation (GtC per year)"
         FF_CH4(t)      "Fraction of fossil methane emissions"
-        RES(box,t)     "Carbon concentration in Reservoir i (GtCO2 from 1765)"
-        TATM(t)        "Increase temperature of atmosphere (degrees C from 1765)"     
-        TSLOW(t)       "Increase temperature from slow response (degrees C from 1765)"
-        TFAST(t)       "Increase temperature from fast response (degrees C from 1765)"
-        CUMEMI(t)      "Total co2 emitted (GtCO2 from 1765)"
-        C_SINKS(t)     "Accumulated carbon in ocean and other sinks (GtCO2)"
-        C_ATM(t)       "Accumulated carbon in atmoshpere (GtCO2)"
+        RES(box,t)     "Carbon concentration in Reservoir i (GtC from 1765)"
+        TATM(t)        "Increase temperature of atmosphere (degrees L from 1765)"     
+        TSLOW(t)       "Increase temperature from slow response (degrees K from 1765)"
+        TFAST(t)       "Increase temperature from fast response (degrees K from 1765)"
+        CUMEMI(t)      "Total co2 emitted (GtC from 1765)"
+        C_SINKS(t)     "Accumulated carbon in ocean and other sinks (GtC)"
+        C_ATM(t)       "Accumulated carbon in atmoshpere (GtC)"
         IRF(t)         "IRF100 at time t"
         ALPHA(t)       "Carbon decay time scaling factor"
         OBJ;
@@ -169,12 +172,16 @@ EQUATIONS
 $if set sai $batinclude "SAI.gms"
 
 ** Four box model for CO2 emission-to-concentrations (nordhaus formulation)
-eq_reslom(box,t+1)..   RES(box,t+1) =E=  ( emshare(box) * taubox(box) * ALPHA(t) * ( W_EMI('co2',t) + EMO(t) ) ) * 
-                                        ( 1 - exp( - tstep / ( taubox(box) * ALPHA(t) ) ) ) + 
-                                        RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) );
+eq_reslom(box,t+1)..   RES(box,t+1) =E=  ( emshare(box) * ( W_EMI('co2',t+1) + EMO(t+1) ) ) * tstep + 
+                                        RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t+1) ) );
+
+**** Nordhaus formulation
+*eq_reslom(box,t)..   RES(box,t+1) =E=  ( emshare(box) * taubox(box) * ALPHA(t) * ( W_EMI('co2',t+1) + EMO(t+1) ) ) * 
+*                                        ( 1 - exp( - tstep / ( taubox(box) * ALPHA(t+1) ) ) ) + 
+*                                        RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t+1) ) );
 
 eq_catm(t)..                               C_ATM(t)  =E=  catmeq + sum(box, RES(box,t) * tstep );
-    
+        
 eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) + EMO(t) )*tstep;
 
 eq_csinks(t)..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catmeq );
@@ -219,7 +226,7 @@ eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 ** calculate alphas imposing IRF 
 eq_irflhs(t)..    IRF(t)    =E=  sum(box, ( ALPHA(t) * emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) ) );
 
-eq_irfrhs(t+1)..  IRF(t+1)    =E=  irf0 + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
+eq_irfrhs(t+1)..    IRF(t+1)    =E=  irf0 + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
 
 eq_inertiaup(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =L= (1+inertia(ghg))*W_EMI(ghg,t);
 
@@ -234,7 +241,10 @@ TATM.LO(t)  = -10;
 TATM.UP(t)  = 20;
 alpha.up(t) = 100;
 alpha.lo(t) = 1e-2;
+IRF.up(t) = 97;
 FF_CH4.up(t) = 1;
+
+** Starting guess
 ALPHA.l(t) = 0.35;
 
 ** Solution options
@@ -285,7 +295,6 @@ active(ghg) = no;
 
 $if %initial_conditions%=="historical_run" $batinclude "run_historical.gms"
 
-
 * Initial conditions
 $ifthen.ic %initial_conditions%=="2020"
 CONC.FX(ghg,tfirst) = conc0(ghg);
@@ -298,15 +307,15 @@ TFAST.fx(tfirst) = tfast0;
 IRF.fx(tfirst) = irf0 + irC * (cumemi0 - (catm0-catmeq) ) * CO2toC + irT * tatm0;
 target_temp(t) = tatm0;
 $elseif.ic %initial_conditions%=="historical_run"
-CONC.FX(ghg,tfirst) =  CONC.l(ghg,'271');
-CUMEMI.fx(tfirst) = CUMEMI.l('271');
-C_ATM.fx(tfirst) = C_ATM.l('271'); 
-RES.fx(box,tfirst) = RES.l(box,'271');
-TATM.FX(tfirst) = TATM.l('271');
-TSLOW.fx(tfirst) = TSLOW.l('271');
-TFAST.fx(tfirst) = TFAST.l('271');
-IRF.fx(tfirst) = irf0 + irC * (CUMEMI.l('271') - (C_ATM.l('271')-catmeq) ) * CO2toC + irT * TATM.l('271');
-target_temp(t) = TATM.l('271');
+CONC.FX(ghg,tfirst) =  CONC.l(ghg,'255');
+CUMEMI.fx(tfirst) = CUMEMI.l('255');
+C_ATM.fx(tfirst) = C_ATM.l('255'); 
+RES.fx(box,tfirst) = RES.l(box,'255');
+TATM.FX(tfirst) = TATM.l('255');
+TSLOW.fx(tfirst) = TSLOW.l('255');
+TFAST.fx(tfirst) = TFAST.l('255');
+IRF.fx(tfirst) = irf0 + irC * (CUMEMI.l('255') - (C_ATM.l('255')-catmeq) ) * CO2toC + irT * TATM.l('255');
+target_temp(t) = TATM.l('255');
 $elseif.ic %initial_conditions%=="preindustrial"
 CONC.FX(ghg,tfirst) = preindustrial_conc(ghg);
 CUMEMI.fx(tfirst) = 0;
@@ -321,12 +330,17 @@ $endif.ic
 
 *** solve the basic model
 active(ghg) = yes;
+W_EMI.fx(ghg,t) = 0;
+*W_EMI.lo(ghg,t) = 0;
+*FF_CH4.fx(t) = 0;
+*FORCING.fx('co2',t) = 2.05224;
+*FORCING.fx('ch4',t) = 0.634364;
+*FORCING.fx('n20',t) = 0.192621;
 solve fair using nlp minimizing OBJ;
 execute_unload "simulation.gdx";
 
 ***** run some experiments
 $ifthen.exp set experiment_ghg 
-
 $if set sai active('sai') = yes;
 $batinclude "experiments/GHGs.gms" "%experiment_ghg%" "%gas%"
 $if set sai W_EMI.up('sai',t) = +inf;
@@ -337,6 +351,8 @@ $endif.exp
 
 $ifthen.exp set experiment_sai 
 $batinclude "experiments/SAI.gms" "%experiment_sai%"
+solve fair using nlp minimizing OBJ;
+solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 
 execute_unload "%experiment_sai%_sai_%initial_conditions%.gdx";

@@ -28,7 +28,7 @@ IRF.fx(tfirst) = irf0;
 
 W_EMI.fx(ghg,t)= sum(t_hist,emi_hist(ghg,t_hist)$thisttot(t_hist,t));
 FF_CH4.fx(t) = sum(t_hist,fossilch4_frac(t_hist)$thisttot(t_hist,t));
-RES.fx(box,t) = emshare(box) * emi_hist('co2','1765');
+*RES.fx(box,tfirst) = emshare(box) * emi_hist('co2','1765');
 active(ghg) = yes;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
