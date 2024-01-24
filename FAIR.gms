@@ -331,11 +331,6 @@ $endif.ic
 *** solve the basic model
 active(ghg) = yes;
 W_EMI.fx(ghg,t) = 0;
-*W_EMI.lo(ghg,t) = 0;
-*FF_CH4.fx(t) = 0;
-*FORCING.fx('co2',t) = 2.05224;
-*FORCING.fx('ch4',t) = 0.634364;
-*FORCING.fx('n20',t) = 0.192621;
 solve fair using nlp minimizing OBJ;
 execute_unload "simulation.gdx";
 
@@ -352,8 +347,5 @@ $endif.exp
 $ifthen.exp set experiment_sai 
 $batinclude "experiments/SAI.gms" "%experiment_sai%"
 solve fair using nlp minimizing OBJ;
-solve fair using nlp minimizing OBJ;
-solve fair using nlp minimizing OBJ;
-
 execute_unload "%experiment_sai%_sai_%initial_conditions%.gdx";
 $endif.exp

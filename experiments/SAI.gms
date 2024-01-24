@@ -25,9 +25,9 @@ inertia("sai") = 0;
 $ifthen.exp %exp% =="pulse"
 W_EMI.fx('sai',tsecond) = 12;
 $elseif.exp %exp% =="constant"
-W_EMI.fx('sai',t)$(ord(t) ge 2) = 12;
+W_EMI.fx('sai',t)$(ord(t) le 100) = 6;
 $elseif.exp %exp% =="linear"
-W_EMI.fx('sai',t)$(ord(t) ge 2) = 12 + (ord(t) - 1) * 0.12;
+W_EMI.fx('sai',t)$(ord(t) le 100) = 6 + (ord(t) - 1) * 0.12;
 $endif.exp
 
 
