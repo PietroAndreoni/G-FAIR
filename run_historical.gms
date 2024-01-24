@@ -12,7 +12,7 @@ $gdxin
 parameter emi_hist(ghg,t_hist);
 parameter fossilch4_frac(t_hist);
 
-emi_hist('co2',t_hist) = 44 / 12 * (q_emi_valid_primap('co2ffi',t_hist,'world')) ;
+emi_hist('co2',t_hist) = 44 / 12 *(q_emi_valid_primap('co2ffi',t_hist,'world')) ;
 emi_hist('ch4',t_hist) = 1e3 / 25 * 44 / 12 *(q_emi_valid_primap('ch4_ffi',t_hist,'world')+q_emi_valid_primap('ch4_wst',t_hist,'world')+q_emi_valid_primap('ch4_agr',t_hist,'world')) ;
 emi_hist('n20',t_hist) = 1e3 / 298 * 44 / 12 *(q_emi_valid_primap('n2o_ffi',t_hist,'world')+q_emi_valid_primap('n2o_wst',t_hist,'world')+q_emi_valid_primap('n2o_agr',t_hist,'world')) ;
 fossilch4_frac(t_hist) = 1e3 / 25 * 44 / 12 * q_emi_valid_primap('ch4_ffi',t_hist,'world')/emi_hist('ch4',t_hist);

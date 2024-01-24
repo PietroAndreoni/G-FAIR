@@ -7,11 +7,12 @@ $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 $setglobal experiment "emissionpulse"
 
-set t /1*300/;
+set t /1*600/;
 alias (t,tt);
 
-sets     tfirst(t), tlast(t);
+sets     tfirst(t),tsecond(t),tlast(t);
 tfirst(t) = yes$(ord(t) eq 1);
+tsecond(t) = yes$(ord(t) eq 2);
 tlast(t) = yes$(ord(t) eq card(t));
 
 scalar tstep "time-step of the model" /1/;
@@ -41,7 +42,7 @@ SCALARS
         dslow      "Thermal response timescale for deep ocean (year)"               /236/
         dfast      "Thermal response timescale for upper ocean (year)"              /4.07/
  
-        irf0     "Pre-industrial IRF100 (year)"                                        /32.4/
+        irf0     "Pre-industrial IRF100 (year)"                                        /35/
         irC      "Increase in IRF100 with cumulative carbon uptake (years per GtC)"  /0.019/
         irT      "Increase in IRF100 with warming (years per degree K)"                /4.165/
         atmosphere_mass "Mass of atmosphere (kg)"                                     /5.1352e18/ 
@@ -54,8 +55,8 @@ SCALARS
         cumemi0   "Initial cumulative emissions in 2020 (GtCO2)"       /2322.833/
         catm0     "Initial concentration in atmosphere in 2020 (GtCO2)"       /3250.547/
         catmeq    "Equilibrium concentration atmosphere  (GtCO2)"            /2156/
-        tslow0    "Initial temperature box 1 change in 2020 (C from 1765)"  /0.1477  /
-        tfast0    "Initial temperature box 2 change in 2020 (C from 1765)"  /1.099454/
+        tslow0    "Initial temperature box 1 change in 2020 (K from 1765)"  /0.1477  /
+        tfast0    "Initial temperature box 2 change in 2020 (K from 1765)"  /1.099454/
         tatm0     "Initial atmospheric temperature change in 2020"          /1.24715 /;
  
 PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"  
@@ -86,17 +87,16 @@ target_temp(t) = 0;
 ** INITIAL CONDITIONS TO BE CALIBRATED TO HISTORY
 ** CALIBRATION;
 
-PARAMETER ghg_mm(ghg) "Molecular mass of greenhouse gases (kg mol-1)";
+PARAMETER ghg_mm(*) "Molecular mass of greenhouse gases (kg mol-1)";
 ghg_mm('co2') = 44.01;
 ghg_mm('ch4') = 16.04;
 ghg_mm('n20') = 44.013;
 
-PARAMETER res0(box)  "Initial concentration in Reservoir 0 in 2020 (GtCO2)";
-*res0("geological processes") = 550.341;
-*res0("deep ocean") = 376.559;
-*res0("biosphere") = 144.958;
-*res0("ocean mixed layer") = 22.6838;
+PARAMETER emitoconc(*) "Conversion factor from emissions to concentration for greenhouse gas i (Gt to ppm/ Mt to ppb)";
+emitoconc(ghg) = 1e18 / atmosphere_mass * ghg_mm(ghg)  / atmosphere_mm;
+emitoconc('c') = 1e18 / atmosphere_mass * 12.01  / atmosphere_mm;
 
+PARAMETER res0(box)  "Initial concentration in Reservoir 0 in 2020 (GtCO2)";
         
 PARAMETER conc0(ghg)  "Initial concentration of greenhouse gas i in 2020 (ppm/ppb)";
 conc0('co2') = 410.8;
@@ -108,11 +108,14 @@ preindustrial_conc('co2') = 278.05;
 preindustrial_conc('ch4') = 722.0;
 preindustrial_conc('n20') = 270.0;
 
-catmeq = preindustrial_conc('co2') * atmosphere_mass / 1e18 / ghg_mm('co2') * atmosphere_mm;
-catm0 = conc0('co2') * atmosphere_mass / 1e18 / ghg_mm('co2') * atmosphere_mm;
-res0(box) = emshare(box) * (catm0-catmeq);
-cumemi0 = 1717.84; #from 1750, source global carbon budget 2022
+catmeq = preindustrial_conc('co2') / emitoconc('co2');
+catm0 = conc0('co2') / emitoconc('co2'); 
+cumemi0 = 1717.8; #from 1750, source global carbon budget 2022
+res0(box) = emshare(box) * (catm0 - catmeq);
 scaling_forc2x = ( -2.4e-7 * sqr( preindustrial_conc('co2') ) +  7.2e-4 * preindustrial_conc('co2') -  1.05e-4 * ( 2*preindustrial_conc('n20') ) + 5.36 ) * log( 2 ) / forc2x;
+
+PARAMETER inertia(ghg);
+inertia(ghg) = 0;
 
 VARIABLES
 *Note: Stock variables correspond to levels at the END of the period
@@ -138,7 +141,7 @@ VARIABLES QSLOW, QFAST;
 **** IMPORTANT PROGRAMMING NOTE. Earlier implementations has reservoirs as non-negative.
 **** However, these are not physical but mathematical solutions.
 **** So, they need to be unconstrained so that can have negative emissions.
-POSITIVE VARIABLES   CONC, RES, IRF, alpha, FF_CH4;
+POSITIVE VARIABLES   CONC, RES, IRF, alpha, FF_CH4, CUMEMI;
 
 EQUATIONS       
         eq_reslom           "Reservoir i law of motion"
@@ -159,6 +162,8 @@ EQUATIONS
         eq_tfast            "Temperature box 2 law of motion"
         eq_irflhs           "Left-hand side of IRF100 equation"
         eq_irfrhs           "Right-hand side of IRF100 equation"
+        eq_inertiaup
+        eq_inertiadown
         eq_obj;
 
 $if set sai $batinclude "SAI.gms"
@@ -174,14 +179,14 @@ eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI
 
 eq_csinks(t)..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catmeq );
     
-eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  C_ATM(t) * 1e18 / atmosphere_mass * ghg_mm('co2')  / atmosphere_mm;
+eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  C_ATM(t) * emitoconc('co2');
 
-eq_deltaconcco2(t+1)$(active('co2'))..     DCONC('co2',t+1) =E= ( C_ATM(t+1) - C_ATM(t) ) * 1e18 / atmosphere_mass * ghg_mm('co2')  / atmosphere_mm  * tstep;
+eq_deltaconcco2(t+1)$(active('co2'))..     DCONC('co2',t+1) =E= ( C_ATM(t+1) - C_ATM(t) )  * emitoconc('co2');
 
 ** Single box model for non-CO2 GHGs  
-eq_deltaconcghg(ghg,t)$(not sameas(ghg,'co2') and active(ghg))..   DCONC(ghg,t) =E= ( W_EMI(ghg,t) + natural_emissions(ghg,t) ) * 1e18 / atmosphere_mass * ghg_mm(ghg)  / atmosphere_mm  * tstep;
+eq_deltaconcghg(ghg,t)$(not sameas(ghg,'co2') and active(ghg))..   DCONC(ghg,t) =E= ( W_EMI(ghg,t) + natural_emissions(ghg,t) ) * emitoconc(ghg)  * tstep;
     
-eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      CONC(ghg,t+1) =E= CONC(ghg,t) * ( exp(-tstep/taughg(ghg)) ) + ( DCONC(ghg,t) + DCONC(ghg,t+1) )/2;
+eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      CONC(ghg,t+1) =E= CONC(ghg,t) * ( exp(-tstep/taughg(ghg)) ) + ( DCONC(ghg,t+1) + DCONC(ghg,t) ) / 2;
 
 ** methanize oxidation to CO2
 eq_methoxi(t)..           EMO(t) =E= 0.61 * FF_CH4(t) * (CONC('ch4',t) - preindustrial_conc('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;
@@ -216,16 +221,21 @@ eq_irflhs(t)..    IRF(t)    =E=  sum(box, ( ALPHA(t) * emshare(box) * taubox(box
 
 eq_irfrhs(t+1)..  IRF(t+1)    =E=  irf0 + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
 
+eq_inertiaup(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =L= (1+inertia(ghg))*W_EMI(ghg,t);
+
+eq_inertiadown(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =G= (1-inertia(ghg))*W_EMI(ghg,t);
+
 eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
 
 **  Upper and lower bounds for stability
-CONC.LO(cghg,t) = 1e-3;
+CONC.LO(cghg,t) = 1e-6;
 CONC.LO(oghg,t) = 0;
 TATM.LO(t)  = -10;
 TATM.UP(t)  = 20;
 alpha.up(t) = 100;
 alpha.lo(t) = 1e-2;
 FF_CH4.up(t) = 1;
+ALPHA.l(t) = 0.35;
 
 ** Solution options
 option iterlim = 99900;
@@ -273,7 +283,7 @@ natural_emissions(ghg,t) = NATEMI.l(ghg);
 active(ghg) = no;
 *************** end natural emissions
 
-$batinclude "run_historical.gms"
+$if %initial_conditions%=="historical_run" $batinclude "run_historical.gms"
 
 
 * Initial conditions
@@ -309,13 +319,25 @@ IRF.fx(tfirst) = irf0;
 target_temp(t) = 0;
 $endif.ic
 
+*** solve the basic model
+active(ghg) = yes;
+solve fair using nlp minimizing OBJ;
+execute_unload "simulation.gdx";
+
 ***** run some experiments
-$ifthen.exp set experiment 
+$ifthen.exp set experiment_ghg 
 
 $if set sai active('sai') = yes;
-$batinclude "experiments/%experiment%_%gas%.gms"
+$batinclude "experiments/GHGs.gms" "%experiment_ghg%" "%gas%"
 $if set sai W_EMI.up('sai',t) = +inf;
 solve fair using nlp minimizing OBJ;
-execute_unload "emission_pulse_%gas%_%initial_conditions%.gdx";
+execute_unload "%experiment_ghg%_%gas%_%initial_conditions%.gdx";
+$endif.exp
 
+
+$ifthen.exp set experiment_sai 
+$batinclude "experiments/SAI.gms" "%experiment_sai%"
+solve fair using nlp minimizing OBJ;
+
+execute_unload "%experiment_sai%_sai_%initial_conditions%.gdx";
 $endif.exp
