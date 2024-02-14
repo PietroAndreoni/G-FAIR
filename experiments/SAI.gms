@@ -18,16 +18,21 @@ $endif.ic
 FF_CH4.fx(t) = 0;
 
 W_EMI.up(ghg,t)$(active(ghg) and not sameas(ghg,'sai'))  = +inf;
-W_EMI.lo(ghg,t)$(active(ghg) and not sameas(ghg,'sai'))  = 0; 
+W_EMI.lo(ghg,t)$(active(ghg) and not sameas(ghg,'sai'))  = 0;
+W_EMI.lo('co2',t)$(active("co2"))  = -inf; 
 W_EMI.fx('sai',t) = 0; 
 inertia("sai") = 0;
+*inertia("co2") = 0.5;
+*inertia("ch4") = 0.5;
 
 $ifthen.exp %exp% =="pulse"
 W_EMI.fx('sai',tsecond) = 12;
 $elseif.exp %exp% =="constant"
-W_EMI.fx('sai',t)$(ord(t) le 100) = 6;
+W_EMI.fx('sai',t) = 12;
+$elseif.exp %exp% =="stepwise"
+W_EMI.fx('sai',t)$(ord(t) le 100) = 12;
 $elseif.exp %exp% =="linear"
-W_EMI.fx('sai',t)$(ord(t) le 100) = 6 + (ord(t) - 1) * 0.12;
+W_EMI.fx('sai',t)$(ord(t) le 100) = 12 + (ord(t) - 1) * 0.12;
 $endif.exp
 
 
