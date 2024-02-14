@@ -7,7 +7,7 @@ $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 *$setglobal experiment "emissionpulse"
 
-set t /1*600/;
+set t /1*1000/;
 alias (t,tt);
 
 sets     tfirst(t),tsecond(t),tlast(t);
@@ -171,7 +171,7 @@ EQUATIONS
 
 $if set sai $batinclude "SAI.gms"
 
-** Four box model for CO2 emission-to-concentrations (nordhaus formulation)
+** Four box model for CO2 emission-to-concentrations (FAIR formulation)
 eq_reslom(box,t+1)..   RES(box,t+1) =E=  ( emshare(box) * ( W_EMI('co2',t+1) + EMO(t+1) ) ) * tstep + 
                                         RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t+1) ) );
 
@@ -293,7 +293,7 @@ natural_emissions(ghg,t) = NATEMI.l(ghg);
 active(ghg) = no;
 *************** end natural emissions
 
-$if %initial_conditions%=="historical_run" $batinclude "run_historical.gms"
+$batinclude "run_historical.gms"
 
 * Initial conditions
 $ifthen.ic %initial_conditions%=="2020"
@@ -305,6 +305,8 @@ TATM.FX(tfirst) = tatm0;
 TSLOW.fx(tfirst) = tslow0;
 TFAST.fx(tfirst) = tfast0;
 IRF.fx(tfirst) = irf0 + irC * (cumemi0 - (catm0-catmeq) ) * CO2toC + irT * tatm0;
+FF_CH4.fx(t) = 0;
+FF_CH4.fx(tfirst) = FF_CH4.l(tfirst);
 target_temp(t) = tatm0;
 $elseif.ic %initial_conditions%=="historical_run"
 CONC.FX(ghg,tfirst) =  CONC.l(ghg,'255');
@@ -325,13 +327,21 @@ TATM.FX(tfirst) = 0;
 TSLOW.fx(tfirst) = 0;
 TFAST.fx(tfirst) = 0;
 IRF.fx(tfirst) = irf0;
+FF_CH4.fx(t) = 0;
 target_temp(t) = 0;
 $endif.ic
 
+parameter save_base(ghg,t,*);
+parameter save_delta(ghg,t,*);
+
 *** solve the basic model
 active(ghg) = yes;
+$if set sai active('sai') = no;
 W_EMI.fx(ghg,t) = 0;
 solve fair using nlp minimizing OBJ;
+save_base(ghg,t,'conc') = CONC.l(ghg,t);
+save_base(ghg,t,'forc') = FORCING.l(ghg,t);
+save_base(ghg,t,'T') = TATM.l(t);
 execute_unload "simulation.gdx";
 
 ***** run some experiments
@@ -340,6 +350,12 @@ $if set sai active('sai') = yes;
 $batinclude "experiments/GHGs.gms" "%experiment_ghg%" "%gas%"
 $if set sai W_EMI.up('sai',t) = +inf;
 solve fair using nlp minimizing OBJ;
+
+
+save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
+save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
+save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
+
 execute_unload "%experiment_ghg%_%gas%_%initial_conditions%.gdx";
 $endif.exp
 
