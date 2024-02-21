@@ -25,14 +25,14 @@ set box "boxes for co2 concentration module"
                                       "biosphere",
                                       "ocean mixed layer" /;
 
-set ghg "Greenhouse gases" /'co2', 'ch4', 'n20'/;
+set ghg "Greenhouse gases" /'co2', 'ch4', 'n2o'/;
 
 set cghg(ghg) "Core greenhouse gases";
 set oghg(ghg) "Other well-mixed greenhouse gases";
 set active(ghg) "active greenhouse gases (if not, assumed constant concentration at initial levels)";
 cghg("co2") = yes;
 cghg("ch4") = yes;
-cghg("n20") = yes;
+cghg("n2o") = yes;
 oghg(ghg)$(not cghg(ghg)) = yes;
 
 SCALARS
@@ -64,8 +64,9 @@ SCALARS
 PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"  
                    taubox(box)    "Decay time constant for reservoir *  (year)"
                    taughg(ghg)    "Decay time constant for ghg *  (year)"
-                   forcing_coeff(ghg) "Concentration to forcing for other green-house gases [W/]"
+                   forcing_coeff(ghg) "Concentration to forcing for other green-house gases [W/m2]"
                    natural_emissions(ghg,t) "Emissions from natural sources for non co2 gasses"
+                   forcing_exogenous(t) "Exogenous forcing from natural sources and exogenous oghgs [W/m2]"
                    target_temp(t) "Target temperature";
 
 natural_emissions(ghg,t) = 0;
@@ -76,7 +77,7 @@ taubox("biosphere") = 36.53;
 taubox("ocean mixed layer") = 4.304;
 
 taughg("ch4") = 9.3;
-taughg("n20") = 121;
+taughg("n2o") = 121;
 
 emshare("geological processes") = 0.2173;
 emshare("deep ocean") = 0.224;
@@ -86,40 +87,39 @@ emshare("ocean mixed layer") = 0.2763;
 forcing_coeff(ghg) = 0;
 target_temp(t) = 0;
 
-** INITIAL CONDITIONS TO BE CALIBRATED TO HISTORY
-** CALIBRATION;
-
 PARAMETER ghg_mm(*) "Molecular mass of greenhouse gases (kg mol-1)";
 ghg_mm('co2') = 44.01;
 ghg_mm('ch4') = 16.04;
-ghg_mm('n20') = 44.013;
+ghg_mm('n2o') = 44.013;
 ghg_mm('c') = 12.01;
 ghg_mm('n2') = 28.013;
 CO2toC = ghg_mm('c') / ghg_mm('co2');
 
+# Conversion between ppb/ppt concentrations and Mt/kt emissions
+# in the RCP databases ppb = Mt and ppt = kt so factor always 1e18
 PARAMETER emitoconc(*) "Conversion factor from emissions to concentration for greenhouse gas i (Gt to ppm/ Mt to ppb)";
 emitoconc(ghg) = 1e18 / atmosphere_mass * atmosphere_mm / ghg_mm(ghg) ;
 emitoconc('c') = 1e18 / atmosphere_mass * atmosphere_mm / ghg_mm('c');
-emitoconc('n2o') = emitoconc('n2o') * ghg_mm('n2') / ghg_mm('n20'); #n20 is expressed in n2 equivalent
+emitoconc('n2o') = emitoconc('n2o') * ghg_mm('n2o') / ghg_mm('n2') ; #n2o is expressed in n2 equivalent
 
 PARAMETER res_2020(box)  "Initial concentration in Reservoir 0 in 2020 (GtCO2)";
         
 PARAMETER conc_2020(ghg)  "Initial concentration of greenhouse gas i in 2020 (ppm/ppb)";
 conc_2020('co2') = 410.8;
 conc_2020('ch4') = 1866.0;
-conc_2020('n20') = 331.1;
+conc_2020('n2o') = 331.1;
 
 PARAMETER conc_preindustrial(ghg) "Pre-industrial concentration of greenhouse gas i (ppm/ppb)";
 conc_preindustrial('co2') = 278.05;
 conc_preindustrial('ch4') = 722.0;
-conc_preindustrial('n20') = 270.0;
+conc_preindustrial('n2o') = 270.0;
 
 catm_preindustrial = conc_preindustrial('co2') / emitoconc('co2');
 catm_2020 = conc_2020('co2') / emitoconc('co2'); 
 cumemi_2020 = 1717.8; #from 1750, source global carbon budget 2022
 emi_2020 = 37.1; #GtCO2 
 res_2020(box) = emshare(box) * (catm_2020-catm_preindustrial);
-scaling_forc2x = ( -2.4e-7 * sqr( conc_preindustrial('co2') ) +  7.2e-4 * conc_preindustrial('co2') -  1.05e-4 * ( 2*conc_preindustrial('n20') ) + 5.36 ) * log( 2 ) / forc2x;
+scaling_forc2x = ( -2.4e-7 * sqr( conc_preindustrial('co2') ) +  7.2e-4 * conc_preindustrial('co2') -  1.05e-4 * ( 2*conc_preindustrial('n2o') ) + 5.36 ) * log( 2 ) / forc2x;
 
 PARAMETER inertia(ghg);
 inertia(ghg) = 0;
@@ -195,25 +195,25 @@ eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * 0.
 ** forcing for the three main greenhouse gases (CO2, CH4, N2O) 
 eq_forcco2(t)..         FORCING('co2',t) =E=  ( -2.4e-7 * sqr( CONC('co2',t) - conc_preindustrial('co2') ) +
                                                 7.2e-4 * ( sqrt( sqr( CONC('co2',t) - conc_preindustrial('co2') ) + sqr(delta) ) - delta ) -
-                                                1.05e-4 * ( CONC('n20',t) +  conc_preindustrial('n20') ) + 5.36 ) *
+                                                1.05e-4 * ( CONC('n2o',t) +  conc_preindustrial('n2o') ) + 5.36 ) *
                                                 log( CONC('co2',t) / conc_preindustrial('co2') ) / scaling_forc2x;
  
 eq_forcch4(t)..         FORCING('ch4',t) =E=  ( -6.5e-7 * (CONC('ch4',t) +  conc_preindustrial('ch4')) -
-                                                4.1e-6 * (CONC('n20',t) +  conc_preindustrial('n20')) + 0.043 ) * 
+                                                4.1e-6 * (CONC('n2o',t) +  conc_preindustrial('n2o')) + 0.043 ) * 
                                                 ( sqrt(CONC('ch4',t)) - sqrt(conc_preindustrial('ch4')) );
 
-eq_forcn20(t)..         FORCING('n20',t) =E=  ( -4.0e-6 * (CONC('co2',t) +  conc_preindustrial('co2')) +
-                                                2.1e-6 * (CONC('n20',t) +  conc_preindustrial('n20')) -
+eq_forcn20(t)..         FORCING('n2o',t) =E=  ( -4.0e-6 * (CONC('co2',t) +  conc_preindustrial('co2')) +
+                                                2.1e-6 * (CONC('n2o',t) +  conc_preindustrial('n2o')) -
                                                 2.45e-6 * (CONC('ch4',t) +  conc_preindustrial('ch4')) + 0.117 ) * 
-                                                ( sqrt(CONC('n20',t)) - sqrt(conc_preindustrial('n20')) );
+                                                ( sqrt(CONC('n2o',t)) - sqrt(conc_preindustrial('n2o')) );
 
 ** forcing for other well-mixed greenhouse gases (F-gases, SOx, BC, OC, NH3, CO, NMVOC, NOx)  
 eq_forcoghg(oghg,t)..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
-eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * sum(ghg, FORCING(ghg,t) * ( 1 - exp(-tstep/dslow) ) );
+eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dslow) );
 
-eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * sum(ghg, FORCING(ghg,t) * ( 1 - exp(-tstep/dfast) ) );
+eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dfast) );
 
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
@@ -286,6 +286,9 @@ solve constant_concentrations_ghg using nlp minimizing obj;
 natural_emissions(ghg,t) = NATEMI.l(ghg);
 active(ghg) = no;
 *************** end natural emissions
+
+*** include forcing from natural sources and exogenous 
+$batinclude "exogenous_forcing.gms"
 
 *** solve the model from pre-industrial era to 2020
 $batinclude "run_historical.gms"
