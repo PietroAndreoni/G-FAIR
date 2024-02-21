@@ -144,7 +144,7 @@ VARIABLES QSLOW, QFAST;
 **** IMPORTANT PROGRAMMING NOTE. Earlier implementations has reservoirs as non-negative.
 **** However, these are not physical but mathematical solutions.
 **** So, they need to be unconstrained so that can have negative emissions.
-POSITIVE VARIABLES   CONC, RES, IRF, alpha, FF_CH4, CUMEMI;
+POSITIVE VARIABLES   CONC, IRF, alpha, FF_CH4, CUMEMI;
 
 EQUATIONS       
         eq_reslom           "Reservoir i law of motion"
