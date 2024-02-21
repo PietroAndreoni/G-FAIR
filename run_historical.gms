@@ -11,20 +11,20 @@ $gdxin "input/RCPs_consolidated.gdx"
 $load emissions_rcp=Emissions,forcing_rcp=Forcing,fossilch4_frac,natemi_hist=natural_emissions
 $gdxin
 
-
-CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
-CUMEMI.fx(tfirst) = 0;
-C_ATM.fx(tfirst) = catm_preindustrial; 
-RES.fx(box,tfirst) = 0;
-TATM.FX(tfirst) = 0;
-TSLOW.fx(tfirst) = 0;
-TFAST.fx(tfirst) = 0;
-IRF.fx(tfirst) = irf_preindustrial;
-
 W_EMI.fx(ghg,t)= sum(t_rcp,emissions_rcp(t_rcp,'%rcp%',ghg)$thisttot(t_rcp,t)) / CO2toC;
 FF_CH4.fx(t) = sum(t_rcp,fossilch4_frac(t_rcp,'%rcp%')$thisttot(t_rcp,t));
 natural_emissions(ghg,t) = sum(t_rcp,natemi_hist(t_rcp,ghg)$thisttot(t_rcp,t));
 active(ghg) = yes;
+
+*** initial conditions 
+CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
+CUMEMI.fx(tfirst) = 0;
+C_ATM.fx(tfirst) = catm_preindustrial; 
+RES.fx(box,tfirst) = 0; #emshare(box) * ( W_EMI.l('co2',tfirst) * CO2toC ) * emitoconc('c') * tstep;
+TATM.FX(tfirst) = 0;
+TSLOW.fx(tfirst) = 0;
+TFAST.fx(tfirst) = 0;
+IRF.fx(tfirst) = irf_preindustrial;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
 CONC.fx(ghg,t)$(not active(ghg)) = conc_preindustrial(ghg);

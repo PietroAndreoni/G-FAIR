@@ -98,8 +98,8 @@ ghg_mm('n2') = 28.013;
 CO2toC = ghg_mm('c') / ghg_mm('co2');
 
 PARAMETER emitoconc(*) "Conversion factor from emissions to concentration for greenhouse gas i (Gt to ppm/ Mt to ppb)";
-emitoconc(ghg) = 1e18 / atmosphere_mass * ghg_mm(ghg)  / atmosphere_mm;
-emitoconc('c') = 1e18 / atmosphere_mass * ghg_mm('c')  / atmosphere_mm;
+emitoconc(ghg) = 1e18 / atmosphere_mass * atmosphere_mm / ghg_mm(ghg) ;
+emitoconc('c') = 1e18 / atmosphere_mass * atmosphere_mm / ghg_mm('c');
 emitoconc('n2o') = emitoconc('n2o') * ghg_mm('n2') / ghg_mm('n20'); #n20 is expressed in n2 equivalent
 
 PARAMETER res_2020(box)  "Initial concentration in Reservoir 0 in 2020 (GtCO2)";
@@ -174,13 +174,13 @@ $if set sai $batinclude "SAI.gms"
 
 ** Four box model for CO2 emission-to-concentrations (FAIR formulation)
 eq_reslom(box,t+1)..   RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
-                                        emshare(box) * ( W_EMI('co2',t+1) * CO2toC + OXI_CH4(t+1) ) * emitoconc('c') * tstep;
+                                        emshare(box) * ( W_EMI('co2',t+1) + OXI_CH4(t+1) ) * emitoconc('co2') * tstep;
 
-eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) ) / CO2toC;
+eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) );
 
-eq_catm(t)..                               C_ATM(t)  =E=  catm_preindustrial + ( CONC('co2',t) - conc_preindustrial('co2') ) / emitoconc('co2');
+eq_catm(t)..                               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
         
-eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) * CO2toC + OXI_CH4(t) )*tstep;
+eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) + OXI_CH4(t) )*tstep;
 
 eq_csinks(t)..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
     
@@ -190,7 +190,7 @@ eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..
                         ( ( W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
 ** methanize oxidation to CO2
-eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('c') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;
+eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;
 
 ** forcing for the three main greenhouse gases (CO2, CH4, N2O) 
 eq_forcco2(t)..         FORCING('co2',t) =E=  ( -2.4e-7 * sqr( CONC('co2',t) - conc_preindustrial('co2') ) +
@@ -218,7 +218,7 @@ eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * sum(ghg,
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
 ** calculate alphas imposing IRF 
-eq_irflhs(t)..    IRF(t)    =E=  sum(box, ( ALPHA(t) * emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) ) );
+eq_irflhs(t)..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
 
 eq_irfrhs(t+1)..    IRF(t+1)    =E=  irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
 
@@ -234,11 +234,10 @@ CONC.LO(oghg,t) = 0;
 TATM.LO(t)  = -10;
 TATM.UP(t)  = 20;
 ALPHA.lo(t) = 1e-2;
-IRF.up(t) = 100;
-IRF.lo(t) = 1e-2;
+ALPHA.up(t) = 1e2;
 IRF.up(t) = 97;
 FF_CH4.up(t) = 1;
-W_EMI.scale(ghg,t) = 1e3;
+*W_EMI.scale(ghg,t) = 1e3;
 ** Starting guess
 ALPHA.l(t) = 0.35;
 
