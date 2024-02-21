@@ -128,9 +128,8 @@ VARIABLES
 *Note: Stock variables correspond to levels at the END of the period
         W_EMI(ghg,t)   "Global missions of greenhouse gas i (GtCO2/MtCH4/MtN20 per year)"
         CONC(ghg,t)    "Concentration of greenhouse gas i (ppm/ppb from 1765)"
-        DCONC(ghg,t)   "Difference in concentration of non co2 greenhouse gases due to emissions at time t (ppm/ppb)"
         FORCING(ghg,t) "Increase in radiative forcing due to ghg i (watts per m2 from 1765)"
-        EMO(t)         "CO2 emissions from methane oxidation (GtC per year)"
+        OXI_CH4(t)         "CO2 emissions from methane oxidation (GtC per year)"
         FF_CH4(t)      "Fraction of fossil methane emissions"
         RES(box,t)     "Carbon concentration in Reservoir i (GtC from 1765)"
         TATM(t)        "Increase temperature of atmosphere (degrees L from 1765)"     
@@ -156,8 +155,6 @@ EQUATIONS
         eq_catm             "Atmospheric carbon equation"
         eq_cumemi           "Total emitted carbon"
         eq_csinks           "Accumulated carbon in sinks equation"
-        eq_deltaconcco2     "Delta in concentration of co2"
-        eq_deltaconcghg     "Delta in concentration of other GHGs"
         eq_concghg          "Concentration equation for other GHGs"
         eq_methoxi          "Methane oxidation equation"
         eq_forcco2          "CO2 forcing equation"
@@ -177,25 +174,23 @@ $if set sai $batinclude "SAI.gms"
 
 ** Four box model for CO2 emission-to-concentrations (FAIR formulation)
 eq_reslom(box,t+1)..   RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
-                                        emshare(box) * ( W_EMI('co2',t+1) * CO2toC + EMO(t+1) ) * emitoconc('c') * tstep;
+                                        emshare(box) * ( W_EMI('co2',t+1) * CO2toC + OXI_CH4(t+1) ) * emitoconc('c') * tstep;
 
-eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) )/CO2toC;
+eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) ) / CO2toC;
 
-eq_deltaconcco2(t+1)$(active('co2'))..     DCONC('co2',t+1) =E= CONC('co2',t+1) - CONC('co2',t);
-
-eq_catm(t)..                               C_ATM(t)  =E=  catm_preindustrial + CONC('co2',t) / emitoconc('co2');
+eq_catm(t)..                               C_ATM(t)  =E=  catm_preindustrial + ( CONC('co2',t) - conc_preindustrial('co2') ) / emitoconc('co2');
         
-eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) + EMO(t) )*tstep;
+eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) * CO2toC + OXI_CH4(t) )*tstep;
 
 eq_csinks(t)..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
     
 ** Single box model for non-CO2 GHGs  
-eq_deltaconcghg(ghg,t)$(not sameas(ghg,'co2') and active(ghg))..   DCONC(ghg,t) =E= ( W_EMI(ghg,t) + natural_emissions(ghg,t) ) * emitoconc(ghg)  * tstep;
-    
-eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      CONC(ghg,t+1) =E= CONC(ghg,t) * ( exp(-tstep/taughg(ghg)) ) + ( DCONC(ghg,t+1) + DCONC(ghg,t) ) / 2;
+eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      
+                        CONC(ghg,t+1) =E= CONC(ghg,t) * exp(-tstep/taughg(ghg)) + 
+                        ( ( W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
 ** methanize oxidation to CO2
-eq_methoxi(t)..           EMO(t) =E= 1e-3 * ghg_mm('c') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;
+eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('c') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;
 
 ** forcing for the three main greenhouse gases (CO2, CH4, N2O) 
 eq_forcco2(t)..         FORCING('co2',t) =E=  ( -2.4e-7 * sqr( CONC('co2',t) - conc_preindustrial('co2') ) +
@@ -238,8 +233,9 @@ CONC.LO(cghg,t) = 1e-9;
 CONC.LO(oghg,t) = 0;
 TATM.LO(t)  = -10;
 TATM.UP(t)  = 20;
-alpha.up(t) = 100;
-alpha.lo(t) = 1e-2;
+ALPHA.lo(t) = 1e-2;
+IRF.up(t) = 100;
+IRF.lo(t) = 1e-2;
 IRF.up(t) = 97;
 FF_CH4.up(t) = 1;
 W_EMI.scale(ghg,t) = 1e3;
@@ -283,7 +279,7 @@ eq_constantconc..      OBJ =E= sum((ghg,t), sqr(CONC(ghg,t) - conc_preindustrial
 
 eq_constantemi(ghg,t)..       NATEMI(ghg) =E= W_EMI(ghg,t);
     
-model constant_concentrations_ghg /eq_deltaconcghg,eq_concghg,eq_constantconc,eq_constantemi/;
+model constant_concentrations_ghg /eq_concghg,eq_constantconc,eq_constantemi/;
 
 CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
 active(ghg)$(not sameas(ghg,'co2')) = yes;

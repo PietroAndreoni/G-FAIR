@@ -24,7 +24,7 @@ IRF.fx(tfirst) = irf_preindustrial;
 W_EMI.fx(ghg,t)= sum(t_rcp,emissions_rcp(t_rcp,'%rcp%',ghg)$thisttot(t_rcp,t)) / CO2toC;
 FF_CH4.fx(t) = sum(t_rcp,fossilch4_frac(t_rcp,'%rcp%')$thisttot(t_rcp,t));
 natural_emissions(ghg,t) = sum(t_rcp,natemi_hist(t_rcp,ghg)$thisttot(t_rcp,t));
-active('co2') = yes;
+active(ghg) = yes;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
 CONC.fx(ghg,t)$(not active(ghg)) = conc_preindustrial(ghg);
