@@ -94,11 +94,13 @@ ghg_mm('co2') = 44.01;
 ghg_mm('ch4') = 16.04;
 ghg_mm('n20') = 44.013;
 ghg_mm('c') = 12.01;
+ghg_mm('n2') = 28.013;
 CO2toC = ghg_mm('c') / ghg_mm('co2');
 
 PARAMETER emitoconc(*) "Conversion factor from emissions to concentration for greenhouse gas i (Gt to ppm/ Mt to ppb)";
 emitoconc(ghg) = 1e18 / atmosphere_mass * ghg_mm(ghg)  / atmosphere_mm;
 emitoconc('c') = 1e18 / atmosphere_mass * ghg_mm('c')  / atmosphere_mm;
+emitoconc('n2o') = emitoconc('n2o') * ghg_mm('n2') / ghg_mm('n20'); #n20 is expressed in n2 equivalent
 
 PARAMETER res_2020(box)  "Initial concentration in Reservoir 0 in 2020 (GtCO2)";
         
