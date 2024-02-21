@@ -7,3 +7,5 @@
 *.log~3
 225a/
 .Rproj.user
+
+*.png
