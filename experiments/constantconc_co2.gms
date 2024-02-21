@@ -1,7 +1,7 @@
 ***** 1: constconc, co2
 active('co2') = yes;
 active('ch4') = no;
-active('n20') = no;
+active('n2o') = no;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
 $ifthen.ic %initial_conditions%=="2020"

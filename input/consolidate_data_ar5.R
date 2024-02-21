@@ -64,7 +64,7 @@ natural_emissions <- paste0("data/", list.files(path="./data",pattern = "\\.csv$
   str_subset("natural") %>%
   read_csv() %>% 
   slice(4:n()) %>%
-  separate(col=1,into=c("year","ch4","n20"), sep="[ \t]+") %>%
+  separate(col=1,into=c("year","ch4","n2o"), sep="[ \t]+") %>%
   mutate_all(~as.numeric(.)) %>%
   pivot_longer(!c(year),names_to="ghg") 
 

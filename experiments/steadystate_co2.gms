@@ -1,7 +1,7 @@
 ***** steady state
 active('co2') = yes;
 active('ch4') = yes;
-active('n20') = yes;
+active('n2o') = yes;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
 $ifthen.ic %initial_conditions%=="2020"

@@ -4,7 +4,7 @@ $set exp %1
 active('sai') = yes;
 active('co2') = yes;
 active('ch4') = yes;
-active('n20') = no;
+active('n2o') = no;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
 $ifthen.ic %initial_conditions%=="2020"

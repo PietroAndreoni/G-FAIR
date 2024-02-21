@@ -3,7 +3,7 @@ require(tidyverse)
 require(gdxtools)
 
 experiment <- "pulse"
-ghg <- c("n20","ch4","co2")
+ghg <- c("n2o","ch4","co2")
 tstart <- "2020"
 
 tsec <- gdxtools::batch_extract("save_delta",
@@ -36,12 +36,12 @@ totcost <- tsec %>%
 temperature <- ggplot(tsec %>% 
        filter(Variable=="T" & ghg=="co2") %>% 
          mutate(value=case_when(gas=="ch4"~value/10,
-                                gas=="n20"~value/100,
+                                gas=="n2o"~value/100,
                                 gas=="co2"~value) )) +
   geom_line(aes(x=t,
                 y=value/1000,
                 color=gas),linewidth=1) + 
-  geom_text(data=data.frame(gas=c("ch4","n20","co2"),
+  geom_text(data=data.frame(gas=c("ch4","n2o","co2"),
                             text=c("x10","x100"," "),
                             value=c(2e-10,3e-9,0)),
             aes(x=250,
@@ -56,12 +56,12 @@ forcing <- ggplot(tsec %>%
          group_by(t,file,gas) %>%
          summarise(value=sum(value)) %>%
          mutate(value=case_when(gas=="ch4"~value/10,
-                                gas=="n20"~value/100,
+                                gas=="n2o"~value/100,
                                 gas=="co2"~value) ) ) +
   geom_line(aes(x=t,
                 y=value/1000,
                 color=gas),linewidth=1)  + 
-  geom_text(data=data.frame(gas=c("ch4","n20","co2"),
+  geom_text(data=data.frame(gas=c("ch4","n2o","co2"),
                             text=c("x10","x100"," "),
                             value=c(2e-10,3e-9,0)),
             aes(x=250,
@@ -78,7 +78,7 @@ ggsave("figure_1.png",width=10,height=6)
 #### figure 2
 absolute <- ggplot(totcost %>% 
                      filter(delta<=0.1  ) %>%
-                     mutate(cost=ifelse(gas=="n20",cost/100,cost))) +
+                     mutate(cost=ifelse(gas=="n2o",cost/100,cost))) +
   geom_line(aes(x=delta*100,
                 y=cost/1000,
                 color=gas),linewidth=1) +
