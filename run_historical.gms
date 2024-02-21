@@ -17,22 +17,23 @@ emi_hist('ch4',t_hist) = 1e3 / 25 * 44 / 12 *(q_emi_valid_primap('ch4_ffi',t_his
 emi_hist('n20',t_hist) = 1e3 / 298 * 44 / 12 *(q_emi_valid_primap('n2o_ffi',t_hist,'world')+q_emi_valid_primap('n2o_wst',t_hist,'world')+q_emi_valid_primap('n2o_agr',t_hist,'world')) ;
 fossilch4_frac(t_hist) = 1e3 / 25 * 44 / 12 * q_emi_valid_primap('ch4_ffi',t_hist,'world')/emi_hist('ch4',t_hist);
 
-CONC.FX(ghg,tfirst) = preindustrial_conc(ghg);
+CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
 CUMEMI.fx(tfirst) = 0;
-C_ATM.fx(tfirst) = catmeq; 
+C_ATM.fx(tfirst) = catm_preindustrial; 
 RES.fx(box,tfirst) = 0;
 TATM.FX(tfirst) = 0;
 TSLOW.fx(tfirst) = 0;
 TFAST.fx(tfirst) = 0;
-IRF.fx(tfirst) = irf0;
+IRF.fx(tfirst) = irf_preindustrial;
 
 W_EMI.fx(ghg,t)= sum(t_hist,emi_hist(ghg,t_hist)$thisttot(t_hist,t));
 FF_CH4.fx(t) = sum(t_hist,fossilch4_frac(t_hist)$thisttot(t_hist,t));
+FF_CH4.fx(t) = 0;
 *RES.fx(box,tfirst) = emshare(box) * emi_hist('co2','1765');
 active(ghg) = yes;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
-CONC.fx(ghg,t)$(not active(ghg)) = preindustrial_conc(ghg);
+CONC.fx(ghg,t)$(not active(ghg)) = conc_preindustrial(ghg);
 
 *natural_emissions('ch4',t) = 191;
 *natural_emissions('n20',t) = 8.99;
