@@ -293,6 +293,7 @@ natural_emissions(ghg,t) = NATEMI.l(ghg);
 active(ghg) = no;
 *************** end natural emissions
 
+*** solve the model from pre-industrial era to 2020
 $batinclude "run_historical.gms"
 
 * Initial conditions
@@ -351,17 +352,21 @@ $batinclude "experiments/GHGs.gms" "%experiment_ghg%" "%gas%"
 $if set sai W_EMI.up('sai',t) = +inf;
 solve fair using nlp minimizing OBJ;
 
+save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
+save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
+save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
+
+execute_unload "%experiment_ghg%_%gas%_%initial_conditions%";
+
+$ifthen.trem set tremoval 
+W_EMI.fx('%gas%','%tremoval%') = -(1e-6$(sameas('%gas%','co2')) + 1e-3$(not sameas('%gas%','co2')));
+solve fair using nlp minimizing OBJ;
 
 save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
 save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
 save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
 
-execute_unload "%experiment_ghg%_%gas%_%initial_conditions%.gdx";
-$endif.exp
+execute_unload "%experiment_ghg%_removal%tremoval%_%gas%_%initial_conditions%";
+$endif.trem
 
-
-$ifthen.exp set experiment_sai 
-$batinclude "experiments/SAI.gms" "%experiment_sai%"
-solve fair using nlp minimizing OBJ;
-execute_unload "%experiment_sai%_sai_%initial_conditions%.gdx";
 $endif.exp
