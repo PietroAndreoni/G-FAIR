@@ -9,6 +9,7 @@ $setglobal rcp "RCP45"
 $setglobal emissions_projections "RCP45"
 *$setglobal no_oforc
 
+*** time
 set t /1*1000/;
 alias (t,tt);
 
@@ -18,7 +19,7 @@ tsecond(t) = yes$(ord(t) eq 2);
 tlast(t) = yes$(ord(t) eq card(t));
 
 scalar tstep "time-step of the model" /1/;
-scalar delta "" /1e-3/; 
+scalar delta "Delta for smooth approximation" /1e-3/; 
 
 set box "boxes for co2 concentration module"
                                 /     "geological processes",
@@ -182,7 +183,7 @@ eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial
 
 eq_catm(t)..                               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
         
-eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t) + OXI_CH4(t) )*tstep;
+eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + OXI_CH4(t+1) )*tstep;
 
 eq_csinks(t)..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
     
