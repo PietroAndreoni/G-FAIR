@@ -224,8 +224,8 @@ eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
 
 *** IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
-eq_irfrhs(t+1)$(active('co2'))..    IRF(t+1)    =E=  ( irf_max + irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) - 
-                                     sqrt( sqr(irf_max - irf_preindustrial + irC * C_SINKS(t) * CO2toC) + sqr(delta) ) ) / 2;
+eq_irfrhs(t+1)$(active('co2'))..    IRF(t+1)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
+                                                    sqrt( sqr(irf_max - (irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) + sqr(delta) ) ) / 2;
 
 eq_inertiaup(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =L= (1+inertia(ghg))*W_EMI(ghg,t);
 
