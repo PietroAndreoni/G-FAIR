@@ -12,7 +12,7 @@ CONC.fx(ghg,t)$(not active(ghg)) = conc0(ghg);
 $elseif.ic %initial_conditions%=="preindustrial"
 CONC.fx(ghg,t)$(not active(ghg)) = preindustrial_conc(ghg);
 $elseif.ic %initial_conditions%=="historical_run"
-CONC.fx(ghg,t)$(not active(ghg)) = CONC.l(ghg,'255');
+CONC.fx(ghg,t)$(not active(ghg)) = CONC.l(ghg,'270');
 $endif.ic
 
 FF_CH4.fx(t) = 0;

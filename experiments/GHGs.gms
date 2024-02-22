@@ -9,7 +9,7 @@ CONC.fx(ghg,t)$(not active(ghg)) = conc_2020(ghg);
 $elseif.ic %initial_conditions%=="preindustrial"
 CONC.fx(ghg,t)$(not active(ghg)) = conc_preindustrial(ghg);
 $elseif.ic %initial_conditions%=="historical_run"
-CONC.fx(ghg,t)$(not active(ghg)) = CONC.l(ghg,'255');
+CONC.fx(ghg,t)$(not active(ghg)) = CONC.l(ghg,'270');
 $endif.ic
 
 $ifthen.exp %exp% =="pulse"
