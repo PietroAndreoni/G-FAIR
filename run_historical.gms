@@ -23,7 +23,10 @@ TFAST.fx(tfirst) = 0;
 IRF.fx(tfirst) = irf_preindustrial;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;
-CONC.fx(ghg,t)$(not active(ghg)) = conc_preindustrial(ghg);
+
+** fix forcing instead of emissions for non active species
+FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_rcp,forcing_rcp(t_rcp,'%emissions_projections%',ghg)$thisttot(t_rcp,t));
+FORCING.fx(ghg,t)$(ord(t) ge card(t_rcp) and not active(ghg)) = sum(t_rcp,forcing_rcp('2500','%emissions_projections%',ghg)$thisttot(t_rcp,t));
 
 solve fair using nlp minimizing OBJ;
 execute_unload "historical.gdx";

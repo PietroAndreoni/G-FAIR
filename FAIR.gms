@@ -176,16 +176,16 @@ EQUATIONS
 $if set sai $batinclude "SAI.gms"
 
 ** Four box model for CO2 emission-to-concentrations (FAIR formulation)
-eq_reslom(box,t+1)..   RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
+eq_reslom(box,t+1)$(active('co2'))..   RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
                                         emshare(box) * ( W_EMI('co2',t+1) + OXI_CH4(t+1) ) * emitoconc('co2') * tstep;
 
 eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) );
 
-eq_catm(t)..                               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
+eq_catm(t)$(active('co2'))..                               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
         
-eq_cumemi(t+1)..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + OXI_CH4(t+1) )*tstep;
+eq_cumemi(t+1)$(active('co2'))..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + OXI_CH4(t+1) )*tstep;
 
-eq_csinks(t)..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
+eq_csinks(t)$(active('co2'))..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
     
 ** Single box model for non-CO2 GHGs  
 eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      
@@ -221,17 +221,17 @@ eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(gh
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
 ** calculate alphas imposing IRF 
-eq_irflhs(t)..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
+eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
 
 *** IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
-eq_irfrhs(t+1)..    IRF(t+1)    =E=  ( irf_max + irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) - 
+eq_irfrhs(t+1)$(active('co2'))..    IRF(t+1)    =E=  ( irf_max + irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) - 
                                      sqrt( sqr(irf_max - irf_preindustrial + irC * C_SINKS(t) * CO2toC) + sqr(delta) ) ) / 2;
 
 eq_inertiaup(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =L= (1+inertia(ghg))*W_EMI(ghg,t);
 
 eq_inertiadown(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =G= (1-inertia(ghg))*W_EMI(ghg,t);
 
-eq_obj..          OBJ =E= sqr(CONC('co2','255') - conc_2020('co2')); #sum(t,sqr(TATM(t)-target_temp(t)) );
+eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
 
 **  Upper and lower bounds for stability
 CONC.LO(cghg,t) = 1e-9;

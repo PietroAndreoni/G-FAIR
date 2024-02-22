@@ -46,7 +46,8 @@ for (file in files){
 }
 
 forcing_rcps <- forcing_rcps %>%
-  pivot_longer(!c(year,rcp),names_to="source") 
+  pivot_longer(!c(year,rcp),names_to="source") %>%
+  mutate(source=str_remove(source,"_rf"))
 
 # extract fraction of methane fossil emissions 
 methane_fraction <- paste0("data/", list.files(path="./data",pattern = "\\.csv$")) %>%
