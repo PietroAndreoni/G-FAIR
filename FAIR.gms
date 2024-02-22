@@ -7,6 +7,7 @@ $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 $setglobal rcp "RCP45"
 $setglobal emissions_projections "RCP45"
+$setglobal no_oforc
 
 set t /1*1000/;
 alias (t,tt);
@@ -296,7 +297,7 @@ $batinclude "run_historical.gms"
 *** initialize the model and emission scenarios
 $batinclude "initialization.gms"
 
-CUMEMI.fx(tfirst) = cumemi_2020;
+$if set no_oforc forcing_exogenous(t) = 0;
 
 parameter save_base(ghg,t,*);
 parameter save_delta(ghg,t,*);
