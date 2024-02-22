@@ -4,7 +4,7 @@ require(gdxtools)
 
 experiment <- "pulse"
 ghg <- c("n2o","ch4","co2")
-tstart <- "2020"
+tstart <- "preindustrial"
 
 tsec <- gdxtools::batch_extract("save_delta",
                         files=paste0("../",experiment,"_",ghg,"_",tstart,".gdx"))$save_delta %>%
@@ -77,7 +77,7 @@ ggsave("figure_1.png",width=10,height=6)
 
 #### figure 2
 absolute <- ggplot(totcost %>% 
-                     filter(delta<=0.1  ) %>%
+                     filter(delta<=0.1 ) %>%
                      mutate(cost=ifelse(gas=="n2o",cost/100,cost))) +
   geom_line(aes(x=delta*100,
                 y=cost/1000,

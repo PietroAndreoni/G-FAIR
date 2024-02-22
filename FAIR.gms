@@ -7,7 +7,7 @@ $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 $setglobal rcp "RCP45"
 $setglobal emissions_projections "RCP45"
-$setglobal no_oforc
+*$setglobal no_oforc
 
 set t /1*1000/;
 alias (t,tt);
@@ -44,7 +44,8 @@ SCALARS
         dslow      "Thermal response timescale for deep ocean (year)"               /236/
         dfast      "Thermal response timescale for upper ocean (year)"              /4.07/
  
-        irf_preindustrial     "Pre-industrial IRF100 (year)"                                        /35/
+        irf_preindustrial     "Pre-industrial IRF100 (%)"                         /35/
+        irf_max               "Maximum IRF100 (%)"                                /97/
         irC      "Increase in IRF100 with cumulative carbon uptake (years per GtC)"  /0.019/
         irT      "Increase in IRF100 with warming (years per degree K)"                /4.165/
         atmosphere_mass "Mass of atmosphere (kg)"                                     /5.1352e18/ 
@@ -221,7 +222,9 @@ eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 ** calculate alphas imposing IRF 
 eq_irflhs(t)..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
 
-eq_irfrhs(t+1)..    IRF(t+1)    =E=  irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t);
+*** IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
+eq_irfrhs(t+1)..    IRF(t+1)    =E=  ( irf_max + irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) - 
+                                     sqrt( sqr(irf_max - irf_preindustrial + irC * C_SINKS(t) * CO2toC) + sqr(delta) ) ) / 2;
 
 eq_inertiaup(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =L= (1+inertia(ghg))*W_EMI(ghg,t);
 
@@ -235,8 +238,8 @@ CONC.LO(oghg,t) = 0;
 TATM.LO(t)  = -10;
 TATM.UP(t)  = 20;
 ALPHA.lo(t) = 1e-2;
-ALPHA.up(t) = 1e2;
-IRF.up(t) = 97;
+ALPHA.up(t) = 1e3;
+IRF.up(t) = 100;
 FF_CH4.up(t) = 1;
 *W_EMI.scale(ghg,t) = 1e3;
 ** Starting guess
