@@ -24,7 +24,7 @@ forcing_exogenous(t)$(ord(t) ge card(t_proj)) = sum(sources,forcing_rcp('2500','
 
 ** fix forcing instead of emissions for non active species
 FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_proj,forcing_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
-FORCING.fx(ghg,t)$(ord(t) ge card(t_proj) and not active(ghg)) = sum(t_proj,forcing_rcp('2500','%emissions_projections%',ghg)$tprojtot(t_proj,t));
+FORCING.fx(ghg,t)$(ord(t) ge card(t_proj) and not active(ghg)) = forcing_rcp('2500','%emissions_projections%',ghg);
 
 $elseif.ic %initial_conditions%=="historical_run"
 CONC.FX(ghg,tfirst) =  CONC.l(ghg,'270');
@@ -45,7 +45,7 @@ forcing_exogenous(t)$(ord(t) ge card(t_proj)) = sum(sources,forcing_rcp('2500','
 
 ** fix forcing instead of emissions for non active species
 FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_proj,forcing_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
-FORCING.fx(ghg,t)$(ord(t) ge card(t_proj) and not active(ghg)) = sum(t_proj,forcing_rcp('2500','%emissions_projections%',ghg)$tprojtot(t_proj,t));
+FORCING.fx(ghg,t)$(ord(t) ge card(t_proj) and not active(ghg)) = forcing_rcp('2500','%emissions_projections%',ghg);
 
 $elseif.ic %initial_conditions%=="preindustrial"
 CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
