@@ -6,7 +6,7 @@ $onMulti
 $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 $setglobal rcp "RCP45"
-
+$setglobal emissions_projections "RCP45"
 
 set t /1*1000/;
 alias (t,tt);
@@ -118,7 +118,7 @@ catm_preindustrial = conc_preindustrial('co2') / emitoconc('co2');
 catm_2020 = conc_2020('co2') / emitoconc('co2'); 
 cumemi_2020 = 1717.8; #from 1750, source global carbon budget 2022
 emi_2020 = 37.1; #GtCO2 
-res_2020(box) = emshare(box) * (catm_2020-catm_preindustrial);
+res_2020(box) = emshare(box) * (conc_2020('co2')-conc_preindustrial('co2'));
 scaling_forc2x = ( -2.4e-7 * sqr( conc_preindustrial('co2') ) +  7.2e-4 * conc_preindustrial('co2') -  1.05e-4 * ( 2*conc_preindustrial('n2o') ) + 5.36 ) * log( 2 ) / forc2x;
 
 PARAMETER inertia(ghg);
@@ -293,49 +293,17 @@ $batinclude "exogenous_forcing.gms"
 *** solve the model from pre-industrial era to 2020
 $batinclude "run_historical.gms"
 
-* Initial conditions
-$ifthen.ic %initial_conditions%=="2020"
-CONC.FX(ghg,tfirst) = conc_2020(ghg);
+*** initialize the model and emission scenarios
+$batinclude "initialization.gms"
+
 CUMEMI.fx(tfirst) = cumemi_2020;
-C_ATM.fx(tfirst) = catm_2020; 
-RES.fx(box,tfirst) = res_2020(box);
-TATM.FX(tfirst) = tatm0;
-TSLOW.fx(tfirst) = tslow0;
-TFAST.fx(tfirst) = tfast0;
-IRF.fx(tfirst) = irf_preindustrial + irC * (cumemi_2020 - (catm_2020-catm_preindustrial) ) * CO2toC + irT * tatm0;
-FF_CH4.fx(t) = 0;
-FF_CH4.fx(tfirst) = FF_CH4.l(tfirst);
-target_temp(t) = tatm0;
-$elseif.ic %initial_conditions%=="historical_run"
-CONC.FX(ghg,tfirst) =  CONC.l(ghg,'255');
-CUMEMI.fx(tfirst) = CUMEMI.l('255');
-C_ATM.fx(tfirst) = C_ATM.l('255'); 
-RES.fx(box,tfirst) = RES.l(box,'255');
-TATM.FX(tfirst) = TATM.l('255');
-TSLOW.fx(tfirst) = TSLOW.l('255');
-TFAST.fx(tfirst) = TFAST.l('255');
-IRF.fx(tfirst) = irf_preindustrial + irC * (CUMEMI.l('255') - (C_ATM.l('255')-catm_preindustrial) ) * CO2toC + irT * TATM.l('255');
-target_temp(t) = TATM.l('255');
-$elseif.ic %initial_conditions%=="preindustrial"
-CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
-CUMEMI.fx(tfirst) = 0;
-C_ATM.fx(tfirst) = catm_preindustrial; 
-RES.fx(box,tfirst) = 0;
-TATM.FX(tfirst) = 0;
-TSLOW.fx(tfirst) = 0;
-TFAST.fx(tfirst) = 0;
-IRF.fx(tfirst) = irf_preindustrial;
-FF_CH4.fx(t) = 0;
-target_temp(t) = 0;
-$endif.ic
 
 parameter save_base(ghg,t,*);
 parameter save_delta(ghg,t,*);
 
 *** solve the basic model
 active(ghg) = yes;
-$if set sai active('sai') = no;
-W_EMI.fx(ghg,t) = 0;
+$if set sai active('sai') = yes;
 solve fair using nlp minimizing OBJ;
 save_base(ghg,t,'conc') = CONC.l(ghg,t);
 save_base(ghg,t,'forc') = FORCING.l(ghg,t);

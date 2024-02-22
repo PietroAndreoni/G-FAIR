@@ -27,5 +27,3 @@ CONC.fx(ghg,t)$(not active(ghg)) = conc_preindustrial(ghg);
 
 solve fair using nlp minimizing OBJ;
 execute_unload "historical.gdx";
-
-$stop
