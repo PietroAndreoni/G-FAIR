@@ -29,4 +29,4 @@ FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_rcp,forcing_rcp(t_rcp,'%emissions_pr
 FORCING.fx(ghg,t)$(ord(t) ge card(t_rcp) and not active(ghg)) = forcing_rcp('2500','%emissions_projections%',ghg);
 
 solve fair using nlp minimizing OBJ;
-execute_unload "historical.gdx";
+execute_unload "Results/historical_%rcp%.gdx";

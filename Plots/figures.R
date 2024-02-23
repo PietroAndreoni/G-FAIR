@@ -4,16 +4,19 @@ require(gdxtools)
 
 experiment <- "pulse"
 ghg <- c("n2o","ch4","co2")
-tstart <- "preindustrial"
+tstart <- "historical_run"
+rcp <- "RCP45"
 
 tsec <- gdxtools::batch_extract("save_delta",
-                        files=paste0("../",experiment,"_",ghg,"_",tstart,".gdx"))$save_delta %>%
+                        files=paste0("../Results/",rcp,"_EXP",experiment,"_GAS",ghg,"_IC",tstart,".gdx"))$save_delta %>%
   as.data.frame() %>% 
   rename(Variable=V3,file=gdx) %>%
   mutate(t=as.numeric(t),
-         file=str_remove(file,".gdx"),
-         file=str_remove(file,"../"),
-         gas=str_sub(file,7,9)) 
+         file=str_remove_all(file,"../Results/|.gdx"),
+         gas=str_extract(file,"(?<=GAS).+?(?=_)"),
+         rcp=str_extract(file,"(?<=RCP).+?(?=_)"),
+         experiment=str_extract(file,"(?<=EXP).+?(?=_)"),
+         initial_conditions=str_extract(file,"(?<=IC).*") ) 
 
 # from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5897825/ 
 forctoTg <- 1/0.2
@@ -78,14 +81,14 @@ ggsave("figure_1.png",width=10,height=6)
 #### figure 2
 absolute <- ggplot(totcost %>% 
                      filter(delta<=0.1 ) %>%
-                     mutate(cost=ifelse(gas=="n2o",cost/100,cost))) +
+                     mutate(cost=ifelse(gas=="n2o",cost/10,cost))) +
   geom_line(aes(x=delta*100,
                 y=cost/1000,
                 color=gas),linewidth=1) +
   ylab('Net Present Cost, CO2 and CH4 [US$]') +
   xlab('Discount rate [%]') + 
   scale_y_continuous(
-    sec.axis = sec_axis(~ . * 100, name = "Net Present Cost, N20 [US$]") )
+    sec.axis = sec_axis(~ . * 10, name = "Net Present Cost, N20 [US$]") )
 
 relative <- ggplot(totcost %>% 
                      filter(delta<=0.1)) +

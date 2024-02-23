@@ -293,13 +293,13 @@ active(ghg) = no;
 *************** end natural emissions
 
 *** include forcing from natural sources and exogenous 
-$batinclude "exogenous_forcing.gms"
+$batinclude "Model/exogenous_forcing.gms"
 
 *** solve the model from pre-industrial era to 2020
-$batinclude "run_historical.gms"
+$batinclude "Model/run_historical.gms"
 
 *** initialize the model and emission scenarios
-$batinclude "initialization.gms"
+$batinclude "Model/initialization.gms"
 
 $if set no_oforc forcing_exogenous(t) = 0;
 
@@ -313,7 +313,8 @@ solve fair using nlp minimizing OBJ;
 save_base(ghg,t,'conc') = CONC.l(ghg,t);
 save_base(ghg,t,'forc') = FORCING.l(ghg,t);
 save_base(ghg,t,'T') = TATM.l(t);
-execute_unload "simulation.gdx";
+save_base(ghg,t,'IRF') = IRF.l(t);
+execute_unload "Results/%rcp%_EXPsimulation_IC%initial_conditions%.gdx";
 
 ***** run some experiments
 $ifthen.exp set experiment_ghg 
@@ -325,8 +326,9 @@ solve fair using nlp minimizing OBJ;
 save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
 save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
 save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
+save_delta(ghg,t,'IRF') = IRF.l(t)-save_base(ghg,t,'IRF');
 
-execute_unload "%experiment_ghg%_%gas%_%initial_conditions%";
+execute_unload "Results/%rcp%_EXP%experiment_ghg%_GAS%gas%_IC%initial_conditions%";
 
 $ifthen.trem set tremoval 
 W_EMI.fx('%gas%','%tremoval%') = -(1e-6$(sameas('%gas%','co2')) + 1e-3$(not sameas('%gas%','co2')));
@@ -336,7 +338,7 @@ save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
 save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
 save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
 
-execute_unload "%experiment_ghg%_removal%tremoval%_%gas%_%initial_conditions%";
+execute_unload "Results/%rcp%_EXP%experiment_ghg%_REM%tremoval%_GAS%gas%_IC%initial_conditions%";
 $endif.trem
 
 $endif.exp
