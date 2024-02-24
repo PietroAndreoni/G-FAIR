@@ -255,42 +255,11 @@ option limcol = 0;
  
 model fair / all /;
 
+** find QSLOW and QFAST given TCR, ECS, and forc2x parameters 
+$batinclude "Input/pre_find_Qs.gms"
 
-**** PRE MODEL 1
-************ find QSLOW and QFAST given climate specifications
-EQUATIONS eq_tecs, eq_ttcr;
-** calculate Qi imposing ECS and TCR (more efficient as a parameter)
-eq_tecs..          Tecs =E= forc2x * (QSLOW + QFAST); 
-
-eq_ttcr..          Ttcr =E= forc2x * (QSLOW * (1 - dslow/69.7 * (1 - exp(-69.7/dslow)) ) +
-                            QFAST * (1 - dfast/69.7 * (1 - exp(-69.7/dfast)) ) ) ; 
-
-model solveqs  / eq_tecs, eq_ttcr /;
-solve solveqs using cns; 
-
-QSLOW.fx = QSLOW.l; 
-QFAST.fx = QFAST.l;
-*************** end QSLOW and QFAST
-
-
-**** PRE MODEL 2
-*************** find "natural" non co2 emissions that grant constant concentrations at steady state (pre-industrial)
-EQUATIONS eq_constantconc,eq_constantemi;
-
-VARIABLE NATEMI(ghg);
-
-eq_constantconc..      OBJ =E= sum((ghg,t), sqr(CONC(ghg,t) - conc_preindustrial(ghg)));
-
-eq_constantemi(ghg,t)..       NATEMI(ghg) =E= W_EMI(ghg,t);
-    
-model constant_concentrations_ghg /eq_concghg,eq_constantconc,eq_constantemi/;
-
-CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
-active(ghg)$(not sameas(ghg,'co2')) = yes;
-solve constant_concentrations_ghg using nlp minimizing obj;
-natural_emissions(ghg,t) = NATEMI.l(ghg);
-active(ghg) = no;
-*************** end natural emissions
+** find natural emissions that grant pre-industrial equilbrium of concentrations for ch4 and n2o
+$if set neutral_natemi $batinclude "Input/pre_find_natemi.gms"
 
 *** include forcing from natural sources and exogenous 
 $batinclude "Model/exogenous_forcing.gms"
@@ -308,7 +277,7 @@ parameter save_delta(ghg,t,*);
 
 *** solve the basic model
 active(ghg) = yes;
-$if set sai active('sai') = yes;
+$if set sai active('sai') = no;
 solve fair using nlp minimizing OBJ;
 save_base(ghg,t,'conc') = CONC.l(ghg,t);
 save_base(ghg,t,'forc') = FORCING.l(ghg,t);
@@ -317,28 +286,4 @@ save_base(ghg,t,'IRF') = IRF.l(t);
 execute_unload "Results/%rcp%_EXPsimulation_IC%initial_conditions%.gdx";
 
 ***** run some experiments
-$ifthen.exp set experiment_ghg 
-$if set sai active('sai') = yes;
-$batinclude "experiments/GHGs.gms" "%experiment_ghg%" "%gas%"
-$if set sai W_EMI.up('sai',t) = +inf;
-solve fair using nlp minimizing OBJ;
-
-save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
-save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
-save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
-save_delta(ghg,t,'IRF') = IRF.l(t)-save_base(ghg,t,'IRF');
-
-execute_unload "Results/%rcp%_EXP%experiment_ghg%_GAS%gas%_IC%initial_conditions%";
-
-$ifthen.trem set tremoval 
-W_EMI.fx('%gas%','%tremoval%') = -(1e-6$(sameas('%gas%','co2')) + 1e-3$(not sameas('%gas%','co2')));
-solve fair using nlp minimizing OBJ;
-
-save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
-save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
-save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
-
-execute_unload "Results/%rcp%_EXP%experiment_ghg%_REM%tremoval%_GAS%gas%_IC%initial_conditions%";
-$endif.trem
-
-$endif.exp
+$if set experiment_ghg $batinclude "experiments/GHGs.gms" "%experiment_ghg%" "%gas%"
