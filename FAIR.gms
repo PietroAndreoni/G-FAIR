@@ -279,6 +279,9 @@ parameter save_delta(ghg,t,*);
 active(ghg) = yes;
 $if set sai active('sai') = no;
 solve fair using nlp minimizing OBJ;
+solve fair using nlp minimizing OBJ;
+solve fair using nlp minimizing OBJ;
+
 save_base(ghg,t,'conc') = CONC.l(ghg,t);
 save_base(ghg,t,'forc') = FORCING.l(ghg,t);
 save_base(ghg,t,'T') = TATM.l(t);

@@ -14,6 +14,8 @@ $endif.exp
 
 $if set sai W_EMI.up('sai',t) = +inf;
 solve fair using nlp minimizing OBJ;
+solve fair using nlp minimizing OBJ;
+solve fair using nlp minimizing OBJ;
 
 save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
 save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
@@ -24,6 +26,8 @@ execute_unload "Results/%rcp%_EXP%experiment_ghg%_GAS%gas%_IC%initial_conditions
 
 $ifthen.trem set tremoval 
 W_EMI.fx('%gas%','%tremoval%') = W_EMI.l('%gas%','%tremoval%') - (1e-6$(sameas('%gas%','co2')) + 1e-3$(not sameas('%gas%','co2')));
+solve fair using nlp minimizing OBJ;
+solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 
 save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
