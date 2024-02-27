@@ -2,7 +2,7 @@ $set exp %1
 $set gas %2
 ***** emission pulse, co2
 
-$if set sai active('sai') = no;
+$if set sai active('sai') = yes;
 
 $ifthen.exp %exp% =="pulse"
 W_EMI.fx('%gas%',tsecond) = W_EMI.l('%gas%',tsecond) + 1e-6$(sameas('%gas%','co2')) + 1e-3$(not sameas('%gas%','co2'));
@@ -12,7 +12,9 @@ $elseif.exp %exp% =="linear"
 W_EMI.fx('%gas%',t)$(ord(t) ge 2) = 37 + (ord(t) - 1) * 0.5;
 $endif.exp
 
-$if set sai W_EMI.up('sai',t) = +inf;
+$if set sai W_EMI.up('sai',t)$(not tfirst(t)) = +inf;
+$if set sai FORCING.lo('sai',t) = -inf;
+
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
