@@ -13,7 +13,7 @@ TSLOW.fx(tfirst) = tslow0;
 TFAST.fx(tfirst) = tfast0;
 IRF.fx(tfirst) = irf_preindustrial + irC * (cumemi_2020 - (catm_2020-catm_preindustrial) ) * CO2toC + irT * tatm0;
 FF_CH4.fx(t) = 0;
-FF_CH4.fx(tfirst) = FF_CH4.l('270');
+FF_CH4.fx(tfirst) = FF_CH4.l('255');
 target_temp(t) = tatm0;
 
 W_EMI.fx(ghg,t)= sum(t_proj,emissions_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
@@ -27,15 +27,15 @@ FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_proj,forcing_rcp(t_proj,'%emissions_
 FORCING.fx(ghg,t)$(ord(t) ge card(t_proj) and not active(ghg)) = forcing_rcp('2500','%emissions_projections%',ghg);
 
 $elseif.ic %initial_conditions%=="historical_run"
-CONC.FX(ghg,tfirst) =  CONC.l(ghg,'270');
-CUMEMI.fx(tfirst) = CUMEMI.l('270');
-C_ATM.fx(tfirst) = C_ATM.l('270'); 
-RES.fx(box,tfirst) = RES.l(box,'270');
-TATM.FX(tfirst) = TATM.l('270');
-TSLOW.fx(tfirst) = TSLOW.l('270');
-TFAST.fx(tfirst) = TFAST.l('270');
-IRF.fx(tfirst) = irf_preindustrial + irC * (CUMEMI.l('270') - (C_ATM.l('270')-catm_preindustrial) ) * CO2toC + irT * TATM.l('270');
-target_temp(t) = TATM.l('270');
+CONC.FX(ghg,tfirst) =  CONC.l(ghg,'255');
+CUMEMI.fx(tfirst) = CUMEMI.l('255');
+C_ATM.fx(tfirst) = C_ATM.l('255'); 
+RES.fx(box,tfirst) = RES.l(box,'255');
+TATM.FX(tfirst) = TATM.l('255');
+TSLOW.fx(tfirst) = TSLOW.l('255');
+TFAST.fx(tfirst) = TFAST.l('255');
+IRF.fx(tfirst) = irf_preindustrial + irC * (CUMEMI.l('255') - (C_ATM.l('255')-catm_preindustrial) ) * CO2toC + irT * TATM.l('255');
+target_temp(t) = TATM.l('255');
 
 W_EMI.fx(ghg,t)= sum(t_proj,emissions_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
 W_EMI.fx(ghg,t)$(ord(t) ge card(t_proj)) = emissions_rcp('2500','%emissions_projections%',ghg);

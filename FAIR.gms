@@ -148,7 +148,7 @@ eq_csinks(t)$(active('co2'))..                             C_SINKS(t) =E=  CUMEM
 ** Single box model for non-CO2 GHGs  
 eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      
                         CONC(ghg,t+1) =E= CONC(ghg,t) * exp(-tstep/taughg(ghg)) + 
-                        ( ( W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
+                        ( (  (ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
 ** methanize oxidation to CO2
 eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;

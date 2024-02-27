@@ -31,7 +31,7 @@ conc_2020('n2o') = 331.1;
 
 conc_preindustrial('co2') = 278.05;
 conc_preindustrial('ch4') = 722.0;
-conc_preindustrial('n2o') = 270.0;
+conc_preindustrial('n2o') = 255.0;
 
 catm_preindustrial = conc_preindustrial('co2') / emitoconc('co2');
 catm_2020 = conc_2020('co2') / emitoconc('co2'); 
