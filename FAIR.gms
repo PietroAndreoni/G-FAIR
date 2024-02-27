@@ -72,60 +72,17 @@ PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"
                    forcing_exogenous(t) "Exogenous forcing from natural sources and exogenous oghgs [W/m2]"
                    target_temp(t) "Target temperature";
 
-natural_emissions(ghg,t) = 0;
- 
-taubox("geological processes") = 1000000;
-taubox("deep ocean") = 394.4;
-taubox("biosphere") = 36.53;
-taubox("ocean mixed layer") = 4.304;
-
-taughg("ch4") = 9.3;
-taughg("n2o") = 121;
-
-emshare("geological processes") = 0.2173;
-emshare("deep ocean") = 0.224;
-emshare("biosphere") = 0.2824;
-emshare("ocean mixed layer") = 0.2763;
-
-forcing_coeff(ghg) = 0;
-target_temp(t) = 0;
-
 PARAMETER ghg_mm(*) "Molecular mass of greenhouse gases (kg mol-1)";
-ghg_mm('co2') = 44.01;
-ghg_mm('ch4') = 16.04;
-ghg_mm('n2o') = 44.013;
-ghg_mm('c') = 12.01;
-ghg_mm('n2') = 28.013;
-CO2toC = ghg_mm('c') / ghg_mm('co2');
 
 # Conversion between ppb/ppt concentrations and Mt/kt emissions
 # in the RCP databases ppb = Mt and ppt = kt so factor always 1e18
 PARAMETER emitoconc(*) "Conversion factor from emissions to concentration for greenhouse gas i (Gt to ppm/ Mt to ppb)";
-emitoconc(ghg) = 1e18 / atmosphere_mass * atmosphere_mm / ghg_mm(ghg) ;
-emitoconc('c') = 1e18 / atmosphere_mass * atmosphere_mm / ghg_mm('c');
-emitoconc('n2o') = emitoconc('n2o') * ghg_mm('n2o') / ghg_mm('n2') ; #n2o is expressed in n2 equivalent
 
 PARAMETER res_2020(box)  "Initial concentration in Reservoir 0 in 2020 (GtCO2)";
         
 PARAMETER conc_2020(ghg)  "Initial concentration of greenhouse gas i in 2020 (ppm/ppb)";
-conc_2020('co2') = 410.8;
-conc_2020('ch4') = 1866.0;
-conc_2020('n2o') = 331.1;
 
 PARAMETER conc_preindustrial(ghg) "Pre-industrial concentration of greenhouse gas i (ppm/ppb)";
-conc_preindustrial('co2') = 278.05;
-conc_preindustrial('ch4') = 722.0;
-conc_preindustrial('n2o') = 270.0;
-
-catm_preindustrial = conc_preindustrial('co2') / emitoconc('co2');
-catm_2020 = conc_2020('co2') / emitoconc('co2'); 
-cumemi_2020 = 1717.8; #from 1750, source global carbon budget 2022
-emi_2020 = 37.1; #GtCO2 
-res_2020(box) = emshare(box) * (conc_2020('co2')-conc_preindustrial('co2'));
-scaling_forc2x = ( -2.4e-7 * sqr( conc_preindustrial('co2') ) +  7.2e-4 * conc_preindustrial('co2') -  1.05e-4 * ( 2*conc_preindustrial('n2o') ) + 5.36 ) * log( 2 ) / forc2x;
-
-PARAMETER inertia(ghg);
-inertia(ghg) = 0;
 
 VARIABLES
 *Note: Stock variables correspond to levels at the END of the period
@@ -169,11 +126,12 @@ EQUATIONS
         eq_tfast            "Temperature box 2 law of motion"
         eq_irflhs           "Left-hand side of IRF100 equation"
         eq_irfrhs           "Right-hand side of IRF100 equation"
-        eq_inertiaup
-        eq_inertiadown
         eq_obj;
 
-$if set sai $batinclude "SAI.gms"
+$if set sai $batinclude "Model/SAI.gms"
+
+***** parameters initialization
+$batinclude "Model/parameters.gms"
 
 ** Four box model for CO2 emission-to-concentrations (FAIR formulation)
 eq_reslom(box,t+1)$(active('co2'))..   RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
@@ -226,10 +184,6 @@ eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box)
 *** IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
 eq_irfrhs(t+1)$(active('co2'))..    IRF(t+1)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
                                                     sqrt( sqr(irf_max - (irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) + sqr(delta) ) ) / 2;
-
-eq_inertiaup(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =L= (1+inertia(ghg))*W_EMI(ghg,t);
-
-eq_inertiadown(t+1,ghg)$(not inertia(ghg) eq 0).. W_EMI(ghg,t+1) =G= (1-inertia(ghg))*W_EMI(ghg,t);
 
 eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
 

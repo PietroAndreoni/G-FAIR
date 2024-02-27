@@ -2,7 +2,7 @@ $set exp %1
 $set gas %2
 ***** emission pulse, co2
 
-$if set sai active('sai') = no;
+$if set sai active('sai') = yes;
 
 $ifthen.exp %exp% =="pulse"
 W_EMI.fx('%gas%',tsecond) = W_EMI.l('%gas%',tsecond) + 1e-6$(sameas('%gas%','co2')) + 1e-3$(not sameas('%gas%','co2'));
