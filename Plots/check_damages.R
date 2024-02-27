@@ -1,7 +1,7 @@
 alpha <- 0.595 #[%GDP/K^2] Howard/Stern
 sens <- 0.84 #[0.84 K/(W*m^2)]
 direct_costs <- 0.1 #[%GDP/(W*m^2)]
-power <- 2 #exponent of direct costs
+power <- 1 #exponent of direct costs
 Cmax <- 4#
 cost <- 0.2
 
