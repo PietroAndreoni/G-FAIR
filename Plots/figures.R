@@ -4,13 +4,18 @@ require(gdxtools)
 
 experiment <- "pulse"
 ghg <- c("n2o","ch4","co2")
-respath <- "../Papers and figures/"
+respath <- "../Paper and figures/"
 tstart <- "historical_run"
 rcp <- "RCP45"
-alpha <- 0.595*1.25/100
-power <- 2
-eff <- 1
+
+## climate damage function parameters
+alpha <- 0.595*1.25/100 
+powerdam <- 2
 gwp <- 105*1e12
+cost <- 0.001
+powercost <- 1
+
+##
 tsec <- gdxtools::batch_extract("save_delta",
                         files=paste0("../Results/",rcp,"_EXP",experiment,"_GAS",ghg,"_IC",tstart,".gdx"))$save_delta %>%
   as.data.frame() %>% 
@@ -45,7 +50,7 @@ TgtoUSD <- 2250*10^6
 forctoUSD <- forctoTg * TgtoUSD # US$/(W/m^2)
 
 totcosttime <- tsec %>% 
-  filter(Variable=="forc") %>%
+  filter(Variable=="forc" & gas==ghg) %>%
   group_by(t,file,gas) %>%
   summarise(value=sum(value)) %>%
   full_join(tsec %>% 
@@ -56,19 +61,37 @@ totcosttime <- tsec %>%
               select(t,rcp,temp,initial_conditions)) %>%
   mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
   ungroup() %>% 
-  cross_join(data.frame(delta=seq(0,0.1,by=0.01))) %>%
-  cross_join(data.frame(senscost= c(0.1,0.5,1,2,10,100))) %>%
-  mutate(dir = value*forctoUSD*senscost,
-         dam = ( gwp*(1- 1 / (1+(1-eff)*alpha*(temp+deltatemp)^power)) -  gwp*(1- 1 / (1+(1-eff)*alpha*(temp)^power )) )  ) 
+  cross_join(data.frame(delta=c(0.005,seq(0,0.05,by=0.01)))) %>%
+  cross_join(data.frame(senscost= c(seq(0,2,by=0.5),5))) %>%
+  cross_join(data.frame(eff= seq(0.75,0.95,by=0.1))) %>%
+  cross_join(data.frame(sensdam= c(seq(0.5,2,by=0.5),5))) %>%
+  mutate(impl = value*forctoUSD,
+         dir = gwp*value*senscost*cost^powercost,
+         dam = ( gwp*(1- 1 / (1+(1-eff)*alpha*sensdam*(temp+deltatemp)^powerdam)) -  gwp*(1- 1 / (1+(1-eff)*alpha*sensdam*(temp)^powerdam )) )  ) 
   
 totcost <- totcosttime %>%
-  group_by(file,delta,gas,senscost) %>%
-  summarise(dirnpv = sum( dir/(1+delta)^(t-1) ),
+  group_by(file,gas,delta,senscost,eff,sensdam) %>%
+  summarise(implnpv = sum( impl/(1+delta)^(t-1) ),
+            dirnpv = sum( dir/(1+delta)^(t-1) ),
             damnpv = sum(  dam / (1+delta)^(t-1) ) ) %>% 
-  ungroup() %>% mutate(cost=dirnpv+damnpv) %>%
-  group_by(file,gas,senscost) %>%
+  ungroup() %>% 
+  mutate(cost=dirnpv+damnpv+implnpv) %>%
+  group_by(file,gas,senscost,eff,sensdam) %>%
   mutate(costnorm = cost/cost[delta==0.01]) 
 
+
+scc <- tsec %>% 
+              filter(Variable=="T" & ghg=="co2") %>%
+              rename(deltatemp = value) %>% 
+              select(t,gas,deltatemp) %>%
+  inner_join(temp %>% 
+               select(t,rcp,temp,initial_conditions)) %>%
+  mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+  ungroup() %>% 
+  cross_join(data.frame(delta=seq(0,0.05,by=0.01))) %>%
+  cross_join(data.frame(sensdam= c(seq(0.5,2,by=0.5),5))) %>%
+  group_by(gas,delta,sensdam) %>%
+  summarise(scc = sum( gwp* ( (1- 1 / (1+alpha*sensdam*(temp+deltatemp)^powerdam)) - (1- 1 / (1+alpha*sensdam*(temp)^powerdam )) ) /(1+delta)^(t-1) ) / 1000 ) 
 
 GWP <- tsec %>% 
   filter(Variable=="forc") %>%
@@ -79,9 +102,9 @@ GWP <- tsec %>%
 ####### figure 1
 temperature <- ggplot(tsec %>% 
        filter(Variable=="T" & ghg=="co2") %>% 
-         mutate(value=case_when(gas=="ch4"~value/10,
-                                gas=="n2o"~value/100,
-                                gas=="co2"~value) )) +
+         mutate(value=case_when(gas=="ch4"~value*10,
+                                gas=="n2o"~value,
+                                gas=="co2"~value*100) )) +
   geom_line(aes(x=t,
                 y=value/1000,
                 color=gas),linewidth=1) + 
@@ -116,52 +139,54 @@ forcing <- ggplot(tsec %>%
   ylab('Radiative forcing variation [W*m^-2]')
 
 fig1 <- ggpubr::ggarrange(temperature,forcing,common.legend=TRUE)
-ggsave("figure_1.png",width=10,height=6,path=respath)
+ggsave("figure_1.png",width=10,height=6,path=respath,plot=fig1)
 
 
 #### figure 2
 absolute <- ggplot(totcost %>% 
-                     filter( delta<=0.05 & delta>=0.01 & senscost == 1) %>%
-                     mutate(cost=case_when(gas=="n2o"~cost/126,
-                                           gas=="ch4"~cost/3.28,
-                                           .default = cost) ) ) +
-  geom_line(aes(x=delta*100,
-                y=cost/1000,
-                color=gas),
-            linewidth=1) + 
-  geom_text(data=data.frame(gas=c("ch4","n2o","co2"),
-                            text=c("x3.28","x126"," "),
-                            value=c(3.8,1.7,0),
-                            intercept=c(2.5,4,0)),
-            aes(x=intercept,
-                y=value,
-                label=text,
-                color=gas)) +
-  ylab('Net Present Cost, CO2 and CH4 [US$]') +
-  xlab('Discount rate [%]') + xlim(c(1,5))
-
-ggplot(totcost %>% 
-         filter( delta %in% c(0,0.02,0.04) & senscost %in% c(0.1,1,10) ) %>%
-         mutate(cost=case_when(gas=="n2o"~cost,
-                               gas=="ch4"~cost,
-                               .default = cost) ) ) +
+           filter(delta != 0 & 
+                    senscost==1 & 
+                     eff==0.75 & 
+                     sensdam==1 ) %>%
+           pivot_longer(c(implnpv,dirnpv,damnpv), names_to="Cost component")) +
   geom_bar(aes(x=as.factor(delta),
-                y=cost/1000,
-                fill=gas),
-            linewidth=1, 
-           stat="identity",position="dodge") + 
+               y=value/1000,
+               fill=`Cost component`),
+           linewidth=1,
+           color="black",
+           stat="identity",
+           position="stack") +
   ylab('Net Present Cost [US$/ton]') +
   xlab('Discount rate [%]') +
-  facet_wrap(gas~.,scales="free")
+  scale_fill_manual(values=c("blue","grey","lightblue"),labels=c("implnpv"="Deployment",
+                                                                 "dirnpv"="Side-effects",
+                                                                 "damnpv"="Imperfect masking")) +
+  facet_wrap(gas~.,scales="free") + theme(legend.position = "top")
 
-relative <- ggplot(totcost %>% 
-                     filter(delta<=0.05 & senscost == 1)) +
-  geom_line(aes(x=delta*100,
+
+relative <- ggplot() +
+  geom_line(data=totcost %>% 
+              filter(delta != 0 & 
+                       eff==0.75 & 
+                       senscost==1 & 
+                       sensdam==1),
+            aes(x=delta*100,
                 y=costnorm,
-                color=gas),linewidth=1) +
+                color=gas),
+            linewidth=1) +
+  geom_ribbon(data=totcost %>% 
+              filter(delta %in% c(0.01,0.02,0.03,0.04,0.05)) %>%
+                group_by(delta,gas) %>%
+                summarise(max=max(costnorm),min=min(costnorm)),
+            aes(x=delta*100,
+                ymin=min,
+                ymax=max,
+                color=gas,
+                fill=gas),
+            linewidth=0.5,
+            alpha=0.2) +
   ylab('Relative cost [frac]') +
-  xlab('Discount rate [%]') +
-  ylim(c(0,1)) + xlim(c(1,5))
+  xlab('Discount rate [%]') + theme(legend.position = "top")
 
-fig2 <- ggpubr::ggarrange(absolute,relative,common.legend=TRUE)
+fig2 <- ggpubr::ggarrange(absolute,relative,widths = c(0.6,0.4))
 ggsave("figure_2.png",width=10,height=6,path=respath)
