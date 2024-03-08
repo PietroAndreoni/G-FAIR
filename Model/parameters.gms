@@ -1,5 +1,6 @@
 natural_emissions(ghg,t) = 0;
 target_temp(t) = 0;
+forcing_coeff(cghg) = 0;
 
 taubox("geological processes") = 1000000;
 taubox("deep ocean") = 394.4;

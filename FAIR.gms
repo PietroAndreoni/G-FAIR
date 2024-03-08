@@ -148,7 +148,7 @@ eq_csinks(t)$(active('co2'))..                             C_SINKS(t) =E=  CUMEM
 ** Single box model for non-CO2 GHGs  
 eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      
                         CONC(ghg,t+1) =E= CONC(ghg,t) * exp(-tstep/taughg(ghg)) + 
-                        ( (  (ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
+                        ( (  W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
 ** methanize oxidation to CO2
 eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;
@@ -169,7 +169,7 @@ eq_forcn20(t)..         FORCING('n2o',t) =E=  ( -4.0e-6 * (CONC('co2',t) +  conc
                                                 ( sqrt(CONC('n2o',t)) - sqrt(conc_preindustrial('n2o')) );
 
 ** forcing for other well-mixed greenhouse gases (F-gases, SOx, BC, OC, NH3, CO, NMVOC, NOx)  
-eq_forcoghg(oghg,t)..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
+eq_forcoghg(oghg,t)$(not sameas(oghg,'sai'))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
 eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dslow) );
@@ -236,6 +236,7 @@ solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 
+save_base(ghg,t,'emi') = W_EMI.l(ghg,t);
 save_base(ghg,t,'conc') = CONC.l(ghg,t);
 save_base(ghg,t,'forc') = FORCING.l(ghg,t);
 save_base(ghg,t,'T') = TATM.l(t);

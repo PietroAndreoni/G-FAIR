@@ -14,12 +14,14 @@ $endif.exp
 
 $if set sai W_EMI.up('sai',t)$(not tfirst(t)) = +inf;
 $if set sai FORCING.lo('sai',t) = -inf;
+target_temp(t) = TATM.l(t);
 
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 
 save_delta(ghg,t,'conc') = CONC.l(ghg,t)-save_base(ghg,t,'conc');
+save_delta(ghg,t,'emi') = W_EMI.l(ghg,t)-save_base(ghg,t,'emi');
 save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
 save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
 save_delta(ghg,t,'IRF') = IRF.l(t)-save_base(ghg,t,'IRF');

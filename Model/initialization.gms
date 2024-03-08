@@ -40,6 +40,9 @@ target_temp(t) = TATM.l('255');
 W_EMI.fx(ghg,t)= sum(t_proj,emissions_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
 W_EMI.fx(ghg,t)$(ord(t) ge card(t_proj)) = emissions_rcp('2500','%emissions_projections%',ghg);
 W_EMI.fx('co2',t) = W_EMI.l('co2',t) / CO2toC;
+FF_CH4.fx(t) = sum(t_proj,fossilch4_frac(t_proj,'%rcp%')$tprojtot(t_proj,t));
+FF_CH4.fx(t)$(ord(t) ge card(t_proj)) = fossilch4_frac('2500','%emissions_projections%');
+
 forcing_exogenous(t)= sum((t_proj,sources),forcing_rcp(t_proj,'%emissions_projections%',sources)$tprojtot(t_proj,t));
 forcing_exogenous(t)$(ord(t) ge card(t_proj)) = sum(sources,forcing_rcp('2500','%emissions_projections%',sources));
 
