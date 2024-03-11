@@ -13,7 +13,7 @@ W_EMI.fx('%gas%',t)$(ord(t) ge 2) = 37 + (ord(t) - 1) * 0.5;
 $endif.exp
 
 $if set sai W_EMI.up('sai',t)$(not tfirst(t)) = +inf;
-$if set sai FORCING.lo('sai',t) = -inf;
+$if set sai FORCING.lo('sai',t) = -inf; FORCING.up('sai',t) = +inf;
 target_temp(t) = TATM.l(t);
 
 solve fair using nlp minimizing OBJ;
@@ -31,7 +31,7 @@ $if set sai execute_unload "Results/%rcp%_EXP%experiment_ghg%masked_GAS%gas%_IC%
 
 $ifthen.trem set tremoval 
 
-W_EMI.fx('%gas%','%tremoval%') = W_EMI.l('%gas%','%tremoval%') - (1e-6$(sameas('%gas%','co2')) + 1e-3$(not sameas('%gas%','co2')));
+W_EMI.fx('%gas%','%tremoval%') = W_EMI.l('%gas%','%tremoval%') - (1e-3$(sameas('%gas%','co2')) + 1$(not sameas('%gas%','co2')));
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
