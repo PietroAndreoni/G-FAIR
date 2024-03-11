@@ -185,7 +185,7 @@ eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box)
 eq_irfrhs(t+1)$(active('co2'))..    IRF(t+1)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
                                                     sqrt( sqr(irf_max - (irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) + sqr(delta) ) ) / 2;
 
-eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
+eq_obj..          OBJ =E= sum(t,sqr((TATM(t)-target_temp(t)) ) );
 
 **  Upper and lower bounds for stability
 CONC.LO(cghg,t) = 1e-9;
@@ -196,10 +196,8 @@ ALPHA.lo(t) = 1e-2;
 ALPHA.up(t) = 1e3;
 IRF.up(t) = 100;
 FF_CH4.up(t) = 1;
-*W_EMI.scale(ghg,t) = 1e3;
 ** Starting guess
 ALPHA.l(t) = 0.35;
-
 ** Solution options
 option iterlim = 99900;
 option reslim = 99999;
@@ -208,6 +206,7 @@ option limrow = 0;
 option limcol = 0;
  
 model fair / all /;
+fair.OptFile = 1;
 
 ** find QSLOW and QFAST given TCR, ECS, and forc2x parameters 
 $batinclude "Input/pre_find_Qs.gms"
