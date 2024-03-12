@@ -140,7 +140,8 @@ forcing <- ggplot(tsec %>%
   geom_line(aes(x=t,
                 y=value,
                 color=gas,
-                linetype=masking),linewidth=1)  + 
+                linetype=masking),
+            linewidth=1)  + 
   # geom_text(data=data.frame(gas=c("ch4","n2o","co2"),
   #                           text=c("x10","x100"," "),
   #                           value=c(2e-10,3e-9,0)),

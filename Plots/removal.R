@@ -1,11 +1,10 @@
-experiment <- "pulse"
+#this script requires pulsemasked.R to be run before
 ghg <- c("co2")
 tremoval <- seq(20,300,by=20)
-tstart <- "historical_run"
-
 
 tsecrem <- gdxtools::batch_extract("save_delta",
-                                files=unique(paste0("../Results/",rcp,"_EXP",experiment,"_REM",tremoval,"_GAS",ghg,"_IC",tstart,".gdx")))$save_delta %>%
+                                files=unique(c(paste0("../Results/",rcp,"_EXP",experiment,"_REM",tremoval,"_GAS",ghg,"_IC",tstart,".gdx"),
+                                               paste0("../Results/",rcp,"_EXP",experiment,"masked","_REM",tremoval,"_GAS",ghg,"_IC",tstart,".gdx"))))$save_delta %>%
   as.data.frame() %>% 
   rename(Variable=V3,file=gdx) %>%
   mutate(t=as.numeric(t),
@@ -14,30 +13,88 @@ tsecrem <- gdxtools::batch_extract("save_delta",
     rcp=str_extract(file,"(?<=RCP).+?(?=_)"),
     experiment=str_extract(file,"(?<=EXP).+?(?=_)"),
     tremoval=as.numeric(str_extract(file,"(?<=REM).+?(?=_)")),
-    initial_conditions=str_extract(file,"(?<=IC).*")) 
+    initial_conditions=str_extract(file,"(?<=IC).*"),
+    masking=ifelse(str_detect(file,"masked"),"yes","no")) %>%
+  mutate(experiment=str_remove(experiment,"masking")) %>%
+  ungroup() %>%
+  complete(t) 
 
+
+
+temperature <- ggplot(tsecrem %>% 
+                        filter(Variable=="T" & 
+                                 masking=="no" & 
+                                 ghg=="co2" & 
+                                 tremoval %in% c(20,60,120,200) )) +
+  geom_line(aes(x=t,
+                y=value/pulse_size,
+                color=as.factor(tremoval)), 
+            linewidth=1) +
+  geom_line(data=tsec %>% 
+              filter(Variable=="T" & 
+                       masking=="no" & 
+                       ghg=="co2" & 
+                       gas=="co2" ),
+            aes(x=t,
+                y=value/pulse_size ), 
+            linewidth=1, 
+            linetype=2)  + 
+  scale_color_viridis_d() +
+  guides(color = guide_legend(title = "Time of removal [years]"))  +
+  xlab('time [years]') +
+  ylab('Temperature variation [K]')
+
+forcing <- ggplot(tsecrem %>%
+                    filter(Variable=="forc" & t<1000 & masking=="yes" & ghg=="sai" & 
+                             tremoval %in% c(20,60,120,200)) %>%
+                    group_by(t,gas,masking,tremoval) %>%
+                    summarise(value=sum(-value)) %>% 
+                    bind_rows(tsecrem %>% 
+                                filter(Variable=="forc" & t<1000 & masking=="no" & ghg!="sai" & 
+                                         tremoval %in% c(20,60,120,200)) %>%
+                                group_by(t,gas,masking,tremoval) %>%
+                                summarise(value=sum(value))) ) +
+  geom_line(aes(x=t,
+                y=value/pulse_size,
+                color=as.factor(tremoval),
+                linetype=masking),
+            linewidth=1)  +
+  geom_line(data=tsec %>%
+              filter(Variable=="forc" & gas=="co2" & ghg!="sai" & masking=="no") %>%
+              group_by(t,file,gas) %>%
+              summarise(value=sum(value) ),
+            aes(x=t,
+                y=value/pulse_size ),
+            linewidth=1,
+            linetype=2)  +
+  scale_color_viridis_d() +
+  guides(color = guide_legend(title = "Time of removal [years]"))  +
+  xlab('time [years]') +
+  ylab('Radiative forcing variation [W*m^-2]')
+fig3 <- ggpubr::ggarrange(temperature,forcing,common.legend=TRUE)
+ggsave("figure_3.png",width=10,height=6,path=respath,plot=fig3)
 
 ###### totcost with removal 
 totcostremtime <- tsecrem %>% 
-  filter(Variable=="forc" & gas=="co2") %>%
-  group_by(t,file,tremoval) %>%
-  summarise(value=sum(value)) %>%
+  filter(Variable=="forc" & ghg=="sai" & masking=="yes") %>%
+  mutate(value=-value) %>%
   inner_join(tsecrem %>% 
-              filter(Variable=="T" & ghg=="co2") %>%
-              rename(deltatemp = value) %>% 
-              select(t,gas,tremoval,deltatemp)) %>%
+               filter(Variable=="T" & ghg=="co2" & masking=="no") %>%
+               rename(deltatemp = value) %>% 
+               select(t,gas,tremoval,deltatemp)) %>%
   inner_join(temp %>% 
                select(t,rcp,temp,initial_conditions)) %>%
   mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
   ungroup() %>% 
-  cross_join(data.frame(delta=seq(0,0.05,by=0.01))) %>%
+  cross_join(data.frame(delta=c(seq(0.01,0.05,by=0.01)))) %>%
+  cross_join(data.frame(senscost= 1)) %>%
+  cross_join(data.frame(eff= 0.85)) %>%
+  cross_join(data.frame(sensdam= 1)) %>%
   cross_join(data.frame(removal=c(seq(500,0,by=-100)))) %>%
-  cross_join(data.frame(senscost= seq(0,0.002,by=0.0005))) %>%
-  cross_join(data.frame(eff= seq(0.5,1,by=0.1))) %>%
-  cross_join(data.frame(sensdam= seq(0,2,by=0.5))) %>%
+  rowwise() %>% mutate(gwpt = min(gwpmax,gwp* (1 + 0.022)^(t-1)) ) %>%
   mutate(impl = value*forctoUSD,
-         dir = gwp*value*senscost,
-         dam = ( gwp*(1- 1 / (1+(1-eff)*alpha*sensdam*(temp+deltatemp)^power)) -  gwp*(1- 1 / (1+(1-eff)*alpha*sensdam*(temp)^power )) )  ) 
+         dir = gwp*value*senscost*cost^powercost,
+         dam = ( gwpt*(1- 1 / (1+(1-eff)*alpha*sensdam*(temp+deltatemp)^powerdam)) -  gwpt*(1- 1 / (1+(1-eff)*alpha*sensdam*(temp)^powerdam )) )  ) 
 
 totcostrem <- totcostremtime %>%
   group_by(file,delta,tremoval,removal,senscost,sensdam,eff) %>%
@@ -47,102 +104,34 @@ totcostrem <- totcostremtime %>%
   inner_join(totcostremtime %>%
                group_by(file,delta,tremoval,removal,senscost,sensdam,eff) %>%
                filter(t==tremoval) %>%
-               summarise(removalnpv = 1000*removal/(1+delta)^(tremoval-1) ) ) %>%
+               summarise(removalnpv = pulse_size*removal/(1+delta)^(tremoval-1) ) ) %>%
   mutate(cost = dirnpv + damnpv + implnpv + removalnpv) %>% 
   group_by(file,tremoval,removal,senscost,sensdam,eff) %>%
   mutate(costnorm = cost/cost[delta==0.01]) 
   
-
-temperature <- ggplot(tsecrem %>% 
-                        filter(Variable=="T" & 
-                                 ghg=="co2" & 
-                                 tremoval %in% c(20,60,120,200) )) +
-  geom_line(aes(x=t,
-                y=value/1000,
-                color=as.factor(tremoval)), 
-            linewidth=1) +
-  geom_line(data=tsec %>% 
-              filter(Variable=="T" & 
-                       ghg=="co2" & gas=="co2" ),
-            aes(x=t,
-                y=value/1000 ), 
-            linewidth=1, 
-            linetype=2)  + 
-  scale_color_viridis_d() +
-  guides(color = guide_legend(title = "Time of removal [years]"))  +
-  xlab('time [years]') +
-  ylab('Temperature variation [K]')
-
-forcing <- ggplot(tsecrem %>% 
-                    filter(Variable=="forc" & 
-                             tremoval %in% c(20,60,120,200) ) %>%
-                    group_by(t,file,tremoval) %>%
-                    summarise(value=sum(value) ) ) +
-  geom_line(aes(x=t,
-                y=value/1000,
-                color=as.factor(tremoval) ), 
-            linewidth=1)  + 
-  geom_line(data=tsec %>% 
-              filter(Variable=="forc" & gas=="co2") %>%
-              group_by(t,file,gas) %>%
-              summarise(value=sum(value) ),
-            aes(x=t,
-                y=value/1000 ), 
-            linewidth=1, 
-            linetype=2)  + 
-  scale_color_viridis_d() +
-  guides(color = guide_legend(title = "Time of removal [years]"))  +
-  xlab('time [years]') +
-  ylab('Radiative forcing variation [W*m^-2]')
-fig3 <- ggpubr::ggarrange(temperature,forcing,common.legend=TRUE)
-ggsave("figure_3.png",width=10,height=6,path=respath,plot=fig3)
-
-ggplot(totcostremtime %>% 
-         filter(tremoval %in% c(20,60,120,200) & 
-                  delta==0.02 & 
-                  removal==50 & 
-                  eff==0.8 & 
-                  senscost==1) %>%
-         mutate(rem = ifelse(t==tremoval,removal*1000,0)) ) +
-  geom_line(aes(x=t,
-                y=(dir+dam+rem+impl)/1000,
-                color=as.factor(tremoval) ), 
-            linewidth=1)  + 
-  geom_line(data=totcosttime %>% 
-              filter(senscost==1 & 
-                       eff==0.8 & 
-                       delta==0.02 & 
-                       gas=="co2"),
-            aes(x=t,
-                y=(dir+dam+impl)/1000 ), 
-            linewidth=1,linetype=2)  + 
-  guides(color = guide_legend(title = "Time of removal [years]"))  +
-  xlab('time [years]') +
-  ylab('Cost of strategy [US$/yr]')
-  
 ####### pareto fronts
 fronts <- totcostrem %>%
   ungroup() %>% 
-  full_join(totcost %>% ungroup() %>%
+  inner_join(totcost %>% ungroup() %>%
               filter(gas=="co2") %>%
               dplyr::select(-file,-costnorm, -damnpv, -dirnpv, -implnpv) %>%
               rename(benchmark=cost) ) %>%
-  filter(cost<benchmark*1.01) %>%
+  filter(cost<benchmark*1.1) %>%
   group_by(file,delta,removal,senscost,eff) %>%
   filter(tremoval==min(tremoval)) %>%
   group_by(delta,tremoval,senscost,eff) %>%
-  filter(removal==max(removal) & removal!=500) 
+  filter(removal==max(removal)) 
   
 
-ggplot(fronts %>% filter(delta %in% c(0,0.01,0.03,0.05) & 
-                           senscost %in% c(0.5,1,1.5) & 
-                           eff==0.8 ) ) +
+ggplot(fronts %>% filter(delta %in% c(0.01,0.03,0.05) & 
+                           senscost %in% c(1) & 
+                           sensdam==1 &
+                           eff==0.85 ) ) +
   geom_line(aes(x=tremoval,
                   y=removal,
                   color=as.factor(paste0(delta*100," %")),
                   linetype=as.factor(senscost) ), 
             linewidth=1 ) +
-  xlim(c(0,300)) + ylim(c(0,1000))+
   ylab('Removal cost [US$/tonCO2]') +
   xlab('Time of removal [years]') +
   scale_linetype_manual(values=c(2,1,3)) +
@@ -151,20 +140,20 @@ ggplot(fronts %>% filter(delta %in% c(0,0.01,0.03,0.05) &
 ggsave("figure_4.png",width=7,height=6,path=respath)
 
 
-ggplot(totcostrem %>% filter(tremoval >100 & 
-                               removal %in% c(100,200,500) & 
+ggplot(totcostrem %>% filter(removal %in% c(100,200,500) & 
                                delta %in% c(0.01,0.03) & 
                                senscost==1 &
-                               eff==0.8 )) +
+                               eff==0.85 & sensdam==1 )) +
   geom_line(aes(x=tremoval,
-                y=cost/1000,
+                y=cost/pulse_size,
                 color=as.factor(removal),
                 linetype=as.factor(delta))) +
   geom_hline(data=totcost %>%
-               filter(str_detect(file,"co2") & delta %in% c(0.01,0.03) & 
+               filter(gas=="co2" & 
+                        delta %in% c(0.01,0.03) & 
                         senscost==1 &
                         eff==0.8 ),
-             aes(yintercept=cost/1000,
+             aes(yintercept=cost/pulse_size,
                  linetype=as.factor(delta))) +
   ylab('Net Present Cost [US$]') +
   xlab('Time of removal')  + 
@@ -202,12 +191,13 @@ ggplot(totcostrem %>%
 
 
 ggplot(totcostrem %>% 
-         filter( delta %in% c(0.01,0.04) & 
-                   senscost==1 & 
-                   eff %in% c(0.8,1) & 
-                   removal %in% c(100) ) ) +
+         filter( delta %in% c(0.01,0.04,0.05) & 
+                   senscost==1 &
+                   sensdam==1 &
+                   eff %in% c(0.85) & 
+                   removal %in% c(100,200,500) ) ) +
   geom_line(aes(x=tremoval,
-               y=cost/1000,
+               y=cost/pulse_size,
                color=as.factor(delta),
                linetype=as.factor(eff))) + 
   ylab('Net Present Cost [US$/ton]') +
@@ -252,4 +242,28 @@ relative <- ggplot(totcostrem %>%
               alpha=0.2) +
   ylab('Relative cost [frac]') +
   xlab('Discount rate [%]') 
+
+ggplot(totcostremtime %>% 
+         filter(tremoval %in% c(20,60,120,200) & 
+                  delta==0.02 & 
+                  removal==100 & 
+                  eff==0.85 & 
+                  senscost==1) %>%
+         mutate(rem = ifelse(t==tremoval,removal*pulse_size,0)) ) +
+  geom_line(aes(x=t,
+                y=(dir+dam+rem+impl)/pulse_size,
+                color=as.factor(tremoval) ), 
+            linewidth=1)  + 
+  geom_line(data=totcosttime %>% 
+              filter(senscost==1 & 
+                       sensdam==1 &
+                       eff==0.85 & 
+                       delta==0.02 & 
+                       gas=="co2"),
+            aes(x=t,
+                y=(dir+dam+impl)/pulse_size ), 
+            linewidth=1,linetype=2)  + 
+  guides(color = guide_legend(title = "Time of removal [years]"))  +
+  xlab('time [years]') +
+  ylab('Cost of strategy [US$/yr]')
 
