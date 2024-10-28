@@ -172,9 +172,9 @@ eq_forcn20(t)..         FORCING('n2o',t) =E=  ( -4.0e-6 * (CONC('co2',t) +  conc
 eq_forcoghg(oghg,t)$(not sameas(oghg,'sai'))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
-eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dslow) );
+eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(tstep/dslow) );
 
-eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dfast) );
+eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(tstep/dfast) );
 
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
