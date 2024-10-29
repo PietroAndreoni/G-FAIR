@@ -19,7 +19,7 @@ tsecond(t) = yes$(ord(t) eq 2);
 tlast(t) = yes$(ord(t) eq card(t));
 
 scalar tstep "time-step of the model" /1/;
-scalar delta "Delta for smooth approximation" /1e-3/; 
+scalar delta "Delta for smooth approximation" /1e-8/; 
 
 set box "boxes for co2 concentration module"
                                 /     "geological processes",
@@ -172,9 +172,9 @@ eq_forcn20(t)..         FORCING('n2o',t) =E=  ( -4.0e-6 * (CONC('co2',t) +  conc
 eq_forcoghg(oghg,t)$(not sameas(oghg,'sai'))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
-eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(tstep/dslow) );
+eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dslow) );
 
-eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(tstep/dfast) );
+eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dfast) );
 
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
@@ -182,7 +182,7 @@ eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
 
 *** IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
-eq_irfrhs(t+1)$(active('co2'))..    IRF(t+1)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
+eq_irfrhs(t)$(active('co2'))..    IRF(t)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
                                                     sqrt( sqr(irf_max - (irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) + sqr(delta) ) ) / 2;
 
 eq_obj..          OBJ =E= sum(t,sqr((TATM(t)-target_temp(t)) ) );

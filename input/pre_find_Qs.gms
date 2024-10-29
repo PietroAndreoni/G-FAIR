@@ -5,7 +5,7 @@ EQUATIONS eq_tecs, eq_ttcr;
 eq_tecs..          Tecs =E= forc2x * (QSLOW + QFAST); 
 
 eq_ttcr..          Ttcr =E= forc2x * (QSLOW * (1 - dslow/69.7 * (1 - exp(-69.7/dslow)) ) +
-                            QFAST * (1 - dfast/69.7 * (1 - exp(69.7/dfast)) ) ) ; 
+                            QFAST * (1 - dfast/69.7 * (1 - exp(-69.7/dfast)) ) ) ; 
 
 model solveqs  / eq_tecs, eq_ttcr /;
 solve solveqs using cns; 
