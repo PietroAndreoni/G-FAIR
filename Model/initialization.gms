@@ -1,8 +1,5 @@
-set t_proj /2020*2500/;
-set tprojtot(t_proj,t);
-tprojtot(t_proj,t) = yes$(t_proj.val-2019 eq t.val);
 
-* Initial conditions
+*Initial conditions
 $ifthen.ic %initial_conditions%=="2020"
 CONC.FX(ghg,tfirst) = conc_2020(ghg);
 CUMEMI.fx(tfirst) = cumemi_2020;
@@ -16,14 +13,14 @@ FF_CH4.fx(t) = 0;
 FF_CH4.fx(tfirst) = FF_CH4.l('255');
 target_temp(t) = tatm0;
 
-W_EMI.fx(ghg,t)= sum(t_proj,emissions_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
+W_EMI.fx(ghg,t)= sum(t_proj,emissions_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t))/tstep;
 W_EMI.fx(ghg,t)$(ord(t) ge card(t_proj)) = emissions_rcp('2500','%emissions_projections%',ghg);
 W_EMI.fx('co2',t) = W_EMI.l('co2',t) / CO2toC;
-forcing_exogenous(t)= sum((t_proj,sources),forcing_rcp(t_proj,'%emissions_projections%',sources)$tprojtot(t_proj,t));
+forcing_exogenous(t)= sum((t_proj,sources),forcing_rcp(t_proj,'%emissions_projections%',sources)$tprojtot(t_proj,t))/tstep;
 forcing_exogenous(t)$(ord(t) ge card(t_proj)) = sum(sources,forcing_rcp('2500','%emissions_projections%',sources));
 
 ** fix forcing instead of emissions for non active species
-FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_proj,forcing_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
+FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_proj,forcing_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t))/tstep;
 FORCING.fx(ghg,t)$(ord(t) ge card(t_proj) and not active(ghg)) = forcing_rcp('2500','%emissions_projections%',ghg);
 
 $elseif.ic %initial_conditions%=="historical_run"
@@ -37,17 +34,17 @@ TFAST.fx(tfirst) = TFAST.l('255');
 IRF.fx(tfirst) = irf_preindustrial + irC * (CUMEMI.l('255') - (C_ATM.l('255')-catm_preindustrial) ) * CO2toC + irT * TATM.l('255');
 target_temp(t) = TATM.l('255');
 
-W_EMI.fx(ghg,t)= sum(t_proj,emissions_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
+W_EMI.fx(ghg,t)= sum(t_proj,emissions_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t))/tstep;
 W_EMI.fx(ghg,t)$(ord(t) ge card(t_proj)) = emissions_rcp('2500','%emissions_projections%',ghg);
 W_EMI.fx('co2',t) = W_EMI.l('co2',t) / CO2toC;
-FF_CH4.fx(t) = sum(t_proj,fossilch4_frac(t_proj,'%rcp%')$tprojtot(t_proj,t));
+FF_CH4.fx(t) = sum(t_proj,fossilch4_frac(t_proj,'%rcp%')$tprojtot(t_proj,t))/tstep;
 FF_CH4.fx(t)$(ord(t) ge card(t_proj)) = fossilch4_frac('2500','%emissions_projections%');
 
-forcing_exogenous(t)= sum((t_proj,sources),forcing_rcp(t_proj,'%emissions_projections%',sources)$tprojtot(t_proj,t));
+forcing_exogenous(t)= sum((t_proj,sources),forcing_rcp(t_proj,'%emissions_projections%',sources)$tprojtot(t_proj,t))/tstep;
 forcing_exogenous(t)$(ord(t) ge card(t_proj)) = sum(sources,forcing_rcp('2500','%emissions_projections%',sources));
 
 ** fix forcing instead of emissions for non active species
-FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_proj,forcing_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t));
+FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_proj,forcing_rcp(t_proj,'%emissions_projections%',ghg)$tprojtot(t_proj,t))/tstep;
 FORCING.fx(ghg,t)$(ord(t) ge card(t_proj) and not active(ghg)) = forcing_rcp('2500','%emissions_projections%',ghg);
 
 $elseif.ic %initial_conditions%=="preindustrial"

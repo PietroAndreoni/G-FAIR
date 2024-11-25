@@ -10,7 +10,7 @@ $setglobal emissions_projections "RCP45"
 *$setglobal no_oforc
 
 *** time
-set t /1*1000/;
+set t /1*535/;
 alias (t,tt);
 
 sets     tfirst(t),tsecond(t),tlast(t);
@@ -18,7 +18,17 @@ tfirst(t) = yes$(ord(t) eq 1);
 tsecond(t) = yes$(ord(t) eq 2);
 tlast(t) = yes$(ord(t) eq card(t));
 
-scalar tstep "time-step of the model" /1/;
+scalar tstep "time-step of the model" /5/;
+
+set t_rcp /1765*2500/;
+set thisttot(t_rcp,t);
+thisttot(t_rcp,t)$( (1760 + t.val*tstep) ge (t_rcp.val-tstep/2) and (1760 + t.val*tstep) lt (t_rcp.val+tstep/2) ) = yes;
+
+set t_proj /2018*2500/;
+set tprojtot(t_proj,t);
+tprojtot(t_proj,t)$( (2015 + t.val*tstep) ge (t_proj.val-tstep/2) and (2015 + t.val*tstep) lt (t_proj.val+tstep/2) ) = yes;
+
+
 scalar delta "Delta for smooth approximation" /1e-8/; 
 
 set box "boxes for co2 concentration module"
@@ -151,7 +161,7 @@ eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..
                         ( (  W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
 ** methanize oxidation to CO2
-eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-1/taughg('ch4')) ) ;
+eq_methoxi(t)..         OXI_CH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * 0.61 * FF_CH4(t) * (CONC('ch4',t) - conc_preindustrial('ch4')) * (1 - exp(-tstep/taughg('ch4')) ) ;
 
 ** forcing for the three main greenhouse gases (CO2, CH4, N2O) 
 eq_forcco2(t)..         FORCING('co2',t) =E=  ( -2.4e-7 * sqr( CONC('co2',t) - conc_preindustrial('co2') ) +
