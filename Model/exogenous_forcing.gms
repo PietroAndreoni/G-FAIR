@@ -7,4 +7,4 @@ $gdxin "input/RCPs_consolidated.gdx"
 $load forcing_rcp=Forcing
 $gdxin
 
-forcing_exogenous(t)= sum( (t_rcp,sources)$thisttot(t_rcp,t),forcing_rcp(t_rcp,'%rcp%',sources)) + 3*sum(t_rcp$thisttot(t_rcp,t),forcing_rcp(t_rcp,'%rcp%','bcsnow'));
+forcing_exogenous(t)= (sum( (t_rcp,sources)$thisttot(t_rcp,t),forcing_rcp(t_rcp,'%rcp%',sources)) + 3*sum(t_rcp$thisttot(t_rcp,t),forcing_rcp(t_rcp,'%rcp%','bcsnow'))) / tstep;
