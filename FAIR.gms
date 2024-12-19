@@ -10,7 +10,7 @@ $setglobal emissions_projections "RCP45"
 *$setglobal no_oforc
 
 *** time
-set t /1*535/;
+set t /1*1000/;
 alias (t,tt);
 
 sets     tfirst(t),tsecond(t),tlast(t);
@@ -18,7 +18,7 @@ tfirst(t) = yes$(ord(t) eq 1);
 tsecond(t) = yes$(ord(t) eq 2);
 tlast(t) = yes$(ord(t) eq card(t));
 
-scalar tstep "time-step of the model" /5/;
+scalar tstep "time-step of the model" /1/;
 
 set t_rcp /1765*2500/;
 set thisttot(t_rcp,t);
