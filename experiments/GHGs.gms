@@ -5,7 +5,7 @@ $set gas %2
 $if set sai active('sai') = yes;
 
 $ifthen.exp %exp% =="pulse"
-W_EMI.fx('%gas%',tsecond) = W_EMI.l('%gas%',tsecond) + 1e-3$(sameas('%gas%','co2')) + 1$(not sameas('%gas%','co2'));
+W_EMI.fx('%gas%',tsecond) = 2*W_EMI.l('%gas%',tsecond);
 $elseif.exp %exp% =="const"
 W_EMI.fx('%gas%',t)$(ord(t) le 125) = 10*44/12;
 $elseif.exp %exp% =="linear"
