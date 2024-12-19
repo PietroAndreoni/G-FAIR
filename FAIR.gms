@@ -52,8 +52,8 @@ SCALARS
         atmosphere_mass "Mass of atmosphere (kg)"                                     /5.1352e18/ 
         atmosphere_mm   "Molecular mass of atmosphere (kg mol-1)"                     /28.97/
         CO2toC          "CO2 to carbon conversion factor"                             /0.2727/
-        Tecs            "equilbrium climate sensitivity (K)" /2.75/
-        Ttcr            "Transient climate response (K)" /1.6/
+        Tecs            "equilbrium climate sensitivity (K)" /3.24/
+        Ttcr            "Transient climate response (K)" /1.79/
         forc2x          "Forcing for 2xCO2 (Wm-2)" /3.71/
         scaling_forc2x  "Scaling factor for CO2 forcing to ensure consistency with user-specified 2xforcing" /1.0/
         emi_2020            "Yearly emissions in 2020 (GtCO2)"
