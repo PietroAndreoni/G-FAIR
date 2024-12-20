@@ -163,7 +163,7 @@ forcing2 <- ggplot(tsec %>%
 forcing <- ggpubr::ggarrange(forcing1+theme(legend.position = "none"),forcing2+theme(legend.position = "none"))
 
 fig1 <- ggpubr::ggarrange(temperature,forcing)
-ggsave("figure_1.svg",width=18,height=9,path=respath,plot=fig1)
+ggsave("figure_1.svg",width=14,height=7,path=respath,plot=fig1)
 
 fig2 <- ggplot() +
   geom_line(data=totcost %>% 
@@ -178,7 +178,7 @@ fig2 <- ggplot() +
   theme_classic() +
   theme(legend.position = "bottom") +
   ylim(c(0,5.1))
-ggsave("figure_2.svg",width=9,height=9,path=respath,plot=fig2)
+ggsave("figure_2.svg",width=7,height=7,path=respath,plot=fig2)
 
 totcost %>% filter(delta == 0.02 & senscost==1) %>% inner_join(pulse_size) %>%
   mutate(cost=ifelse(gas=="co2",cost/pulse_size*1e-9,cost/pulse_size*1e-6))
@@ -192,7 +192,8 @@ totcost %>% filter(delta == 0.05 & senscost==1) %>% inner_join(pulse_size) %>%
 ##### social cost of carbon 
 ggplot() +
   geom_line(data=scc %>% 
-              filter(sensdam==1 & delta>=0.01),
+              filter(sensdam==1 & delta>=0.01) %>%
+              inner_join(pulse_size),
             aes(x=delta*100,
                 y=scc/pulse_size,
                 color=gas),

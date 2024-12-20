@@ -62,12 +62,13 @@ macc_by_gas_w <- macc %>%
   mutate(cost=cost*ar4gwp[e]*12/44) %>%
   select(year,e,cost,miu)
 
-ggplot(macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2020,2050) & cost<2000 )) +
-  #  geom_segment(aes(x=0,xend=max(miu*100),y=140,yend=140),linewidth=1.2,linetype=2,color="darkgrey") +
+fig3 <- ggplot(macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2020,2050) & cost<2000 )) +
+  #geom_segment(aes(x=0,xend=max(miu*100),y=140,yend=140),linewidth=1.2,linetype=2,color="darkgrey") +
+  geom_rect(aes(xmin=0,xmax=max(miu*100),ymin=110,ymax=150),alpha=0.1,fill="#F8766D") +
   geom_line(aes(x=miu*100,y=cost,color=as.factor(year)),linewidth=1.5)+
-  geom_rect(aes(xmin=0,xmax=max(miu*100),ymin=110,ymax=150),alpha=0.1,fill="grey") +
   geom_hline(yintercept=0) +
-  scale_color_viridis_d() + 
+  scale_color_manual(values=c("#6BAED6","#08306B")) + 
   theme_classic() + 
-  ylab("Cost [$/tonCH4]") + xlab("Emission reduction [% of baseline]") +
+  ylab("Abatement cost ($/tonCH4)") + xlab("Emission reductions (% of baseline)") +
   theme(legend.position = "none")
+ggsave("figure_2.svg",width=7,height=7,path=respath,plot=fig3)
