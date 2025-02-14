@@ -1,4 +1,4 @@
-set sources /'solar','volcanic_annual','tropoz','stratoz','cloud_tot','totaer_dir','ch4oxstrath2o','landuse'/;
+set sources /'solar','volcanic_annual','stratoz','cloud_tot','totaer_dir','landuse'/;
 set sources /'fgassum','mhalosum'/;
 
 parameter forcing_rcp(*,*,*);

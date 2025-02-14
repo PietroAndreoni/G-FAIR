@@ -20,6 +20,8 @@ ghg_mm('ch4') = 16.04;
 ghg_mm('n2o') = 44.013;
 ghg_mm('c') = 12.01;
 ghg_mm('n2') = 28.013;
+ghg_mm('h2o') = 18.02;
+ghg_mm('o3trop') = 42.00;
 CO2toC = ghg_mm('c') / ghg_mm('co2');
 
 emitoconc(ghg) = 1e18 / atmosphere_mass * atmosphere_mm / ghg_mm(ghg) ;

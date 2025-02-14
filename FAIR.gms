@@ -6,7 +6,6 @@ $onMulti
 $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 $setglobal rcp "RCP45"
-$setglobal emissions_projections "RCP45"
 *$setglobal no_oforc
 
 *** time
@@ -37,15 +36,19 @@ set box "boxes for co2 concentration module"
                                       "biosphere",
                                       "ocean mixed layer" /;
 
-set ghg "Greenhouse gases" /'co2', 'ch4', 'n2o'/;
+set ghg "Greenhouse gases" /'co2', 'ch4', 'n2o', 'h2o', 'o3trop'/;
+set pre "Precursor gases (that are not ghgs)" /'co','no_x','nmvoc'/; 
 
 set cghg(ghg) "Core greenhouse gases";
-set oghg(ghg) "Other well-mixed greenhouse gases";
+set oghg(ghg) "Other well-mixed greenhouse gases with emission and concentration represenation";
+set preghg(ghg) "Other greenhouse gases without emission and concentration represenation";
 set active(ghg) "active greenhouse gases (if not, assumed constant concentration at initial levels)";
 cghg("co2") = yes;
 cghg("ch4") = yes;
 cghg("n2o") = yes;
-oghg(ghg)$(not cghg(ghg)) = yes;
+preghg("o3trop") = yes;
+preghg("h2o") = yes;
+oghg(ghg)$(not cghg(ghg) and not preghg(ghg)) = yes;
 
 SCALARS
         yr_2020     "Calendar year that corresponds to model year zero"         /2020/
@@ -79,6 +82,7 @@ PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"
                    taughg(ghg)    "Decay time constant for ghg *  (year)"
                    forcing_coeff(ghg) "Concentration to forcing for other green-house gases [W/m2]"
                    natural_emissions(ghg,t) "Emissions from natural sources for non co2 gasses"
+                   wemi_pre(pre,t)          "Emissions of precursor gases"
                    forcing_exogenous(t) "Exogenous forcing from natural sources and exogenous oghgs [W/m2]"
                    target_temp(t) "Target temperature";
 
@@ -130,6 +134,8 @@ EQUATIONS
         eq_forcco2          "CO2 forcing equation"
         eq_forcch4          "CH4 forcing equation"
         eq_forcn20          "N2O forcing equation"
+        eq_forch2o
+        eq_forco3trop
         eq_forcoghg         "Other GHG forcing equation"
         eq_tatm             "Temperature-climate equation for atmosphere"
         eq_tslow            "Temperature box 1 law of motion"
@@ -137,8 +143,6 @@ EQUATIONS
         eq_irflhs           "Left-hand side of IRF100 equation"
         eq_irfrhs           "Right-hand side of IRF100 equation"
         eq_obj;
-
-$if set sai $batinclude "Model/SAI.gms"
 
 ***** parameters initialization
 $batinclude "Model/parameters.gms"
@@ -149,14 +153,14 @@ eq_reslom(box,t+1)$(active('co2'))..   RES(box,t+1) =E= RES(box,t) * exp( - tste
 
 eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) );
 
-eq_catm(t)$(active('co2'))..                               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
+eq_catm(t)$(active('co2'))..               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
         
-eq_cumemi(t+1)$(active('co2'))..                           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + OXI_CH4(t+1) )*tstep;
+eq_cumemi(t+1)$(active('co2'))..           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + OXI_CH4(t+1) )*tstep;
 
-eq_csinks(t)$(active('co2'))..                             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
+eq_csinks(t)$(active('co2'))..             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
     
 ** Single box model for non-CO2 GHGs  
-eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and active(ghg))..      
+eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and not preghg(ghg) and active(ghg))..      
                         CONC(ghg,t+1) =E= CONC(ghg,t) * exp(-tstep/taughg(ghg)) + 
                         ( (  W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
@@ -178,8 +182,16 @@ eq_forcn20(t)..         FORCING('n2o',t) =E=  ( -4.0e-6 * (CONC('co2',t) +  conc
                                                 2.45e-6 * (CONC('ch4',t) +  conc_preindustrial('ch4')) + 0.117 ) * 
                                                 ( sqrt(CONC('n2o',t)) - sqrt(conc_preindustrial('n2o')) );
 
+eq_forch2o(t)..         FORCING('h2o',t) =E= 0.12 * FORCING('ch4',t); 
+
+eq_forco3trop(t)..      FORCING('o3trop',t) =E= 1.74e-4 * (CONC('ch4',t) - conc_preindustrial('ch4')) +
+                                            9.08e-4 * (wemi_pre('no_x',t)-2) +
+                                            8.51e-5 * (wemi_pre('co',t)-170) +
+                                            2.25e-4 * (wemi_pre('nmvoc',t)-5) +
+                                            ( 0.032 * (exp(-1.35*(TATM(t)) ) - 1) - sqrt( sqr(0.032 * (exp(-1.35*(TATM(t))) - 1) ) + sqr(1e-8)) ) / 2   ;
+
 ** forcing for other well-mixed greenhouse gases (F-gases, SOx, BC, OC, NH3, CO, NMVOC, NOx)  
-eq_forcoghg(oghg,t)$(not sameas(oghg,'sai'))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
+eq_forcoghg(oghg,t)$(active(oghg))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
 eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dslow) );
@@ -208,6 +220,9 @@ IRF.up(t) = 100;
 FF_CH4.up(t) = 1;
 ** Starting guess
 ALPHA.l(t) = 0.35;
+** Deactivate SRM by default
+SRM.fx(t) = 0;
+
 ** Solution options
 option iterlim = 99900;
 option reslim = 99999;
@@ -227,7 +242,7 @@ $if set neutral_natemi $batinclude "Input/pre_find_natemi.gms"
 *** include forcing from natural sources and exogenous 
 $batinclude "Model/exogenous_forcing.gms"
 
-*** solve the model from pre-industrial era to 2020
+*** solve the model from pre-industrial era 
 $batinclude "Model/run_historical.gms"
 
 *** initialize the model and emission scenarios
@@ -240,7 +255,6 @@ parameter save_delta(ghg,t,*);
 
 *** solve the basic model
 active(ghg) = yes;
-$if set sai active('sai') = no;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
