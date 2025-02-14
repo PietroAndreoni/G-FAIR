@@ -114,6 +114,7 @@ VARIABLES
         C_ATM(t)       "Accumulated carbon in atmoshpere (GtC)"
         IRF(t)         "IRF100 at time t"
         ALPHA(t)       "Carbon decay time scaling factor"
+        SRM(t)         "Forcing masked with solar radiation management (W/m2)"
         OBJ;
 
 VARIABLES QSLOW, QFAST;
@@ -121,7 +122,7 @@ VARIABLES QSLOW, QFAST;
 **** IMPORTANT PROGRAMMING NOTE. Earlier implementations has reservoirs as non-negative.
 **** However, these are not physical but mathematical solutions.
 **** So, they need to be unconstrained so that can have negative emissions.
-POSITIVE VARIABLES   CONC, IRF, alpha, FF_CH4, CUMEMI;
+POSITIVE VARIABLES   CONC, IRF, alpha, FF_CH4, CUMEMI, SRM;
 
 EQUATIONS       
         eq_reslom           "Reservoir i law of motion"
@@ -194,9 +195,9 @@ eq_forco3trop(t)..      FORCING('o3trop',t) =E= 1.74e-4 * (CONC('ch4',t) - conc_
 eq_forcoghg(oghg,t)$(active(oghg))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
-eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dslow) );
+eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - SRM(t) ) * ( 1 - exp(-tstep/dslow) );
 
-eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dfast) );
+eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - SRM(t) ) * ( 1 - exp(-tstep/dfast) );
 
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
