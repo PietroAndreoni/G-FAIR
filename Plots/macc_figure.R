@@ -64,7 +64,7 @@ macc_by_gas_w <- macc %>%
 
 fig3 <- ggplot(macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2020,2050) & cost<2000 )) +
   #geom_segment(aes(x=0,xend=max(miu*100),y=140,yend=140),linewidth=1.2,linetype=2,color="darkgrey") +
-  geom_rect(aes(xmin=0,xmax=max(miu*100),ymin=110,ymax=150),alpha=0.1,fill="#F8766D") +
+  geom_rect(aes(xmin=0,xmax=max(miu*100),ymin=227,ymax=567),alpha=0.1,fill="#F8766D") +
   geom_line(aes(x=miu*100,y=cost,color=as.factor(year)),linewidth=1.5)+
   geom_hline(yintercept=0) +
   scale_color_manual(values=c("#6BAED6","#08306B")) + 
