@@ -13,8 +13,9 @@ alpha <- 0.595*1.25/100
 powerdam <- 2
 gwp <- 105*1e12
 cost <- 0.001
-powercost <- 1
-eff <- 0.15
+theta <- 30 * pi/180
+eff <- 0.25
+cs <- 3.24/3.71 
 
 ##
 tsec <- gdxtools::batch_extract("save_delta",
@@ -73,11 +74,18 @@ totcosttime <- tsec %>%
                select(t,rcp,temp,initial_conditions)) %>%
   mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
   ungroup() %>% 
-  cross_join(data.frame(delta=c(seq(0.002,0.06,by=0.002)))) %>%
+  cross_join(data.frame(delta=c(seq(0,0.06,by=0.002)))) %>%
   rowwise() %>% mutate(gwpt = min(gwpmax,gwp* (1 + 0.022)^(t-1)) ) %>%
   mutate(impl = value*forctoUSD,
          dir = gwp*value*cost,
-         dam = (gwp*alpha*((temp+deltatemp)**powerdam-temp**powerdam) ) ) 
+         dam = gwp*(alpha*((temp+deltatemp)**powerdam-temp**powerdam) ),
+         mask = gwp*alpha*temp * 2 * (1-cos(theta)) * value * ecs ) 
+
+ggplot(totcosttime %>% filter(delta==0.022) %>%
+         full_join(pulse_size)) +
+  geom_line(aes(x=t,y=mask/pulse_size,color=gas)) +
+  geom_line(aes(x=t,y=dam/pulse_size,color=gas),linetype=2) +
+  facet_wrap(gas~.,scales="free") + xlim(c(0,200))
 
 damt <- totcosttime %>%
   group_by(file,gas,delta) %>%
@@ -86,18 +94,21 @@ damt <- totcosttime %>%
   cross_join(data.frame(tt=seq(10,1000,by=10))) %>%
   filter(t>tt) %>%
   group_by(file,gas,delta,tt) %>%
-  summarise(damnpv = sum( ((1-eff)*dam) / (1+delta)^t) ) %>%
+  summarise( damnpv = sum( (dam - mask - impl - dir) / (1+delta)^t)) %>%
   ungroup() %>% cross_join(data.frame(prob=seq(0,0.05,by=0.002))) %>%
   group_by(file,gas,delta,prob) %>%
   summarise(termnpv = sum(prob * (1-prob) ^ (tt/10-1) * damnpv )  ) 
 
 damres <- totcosttime %>%
   group_by(file,gas,delta) %>%
-  mutate(forcnorm=value/max(value)) %>%
-  ungroup() %>% filter(forcnorm>0.001) %>%
-  group_by(file,gas,delta) %>%
-  summarise(damnpv = sum( (eff*dam) / (1+delta)^t) ) 
+  summarise(masknpv = sum( mask / (1+delta)^t) ) 
 
+scc <- totcosttime %>%
+  group_by(file,gas,delta) %>%
+  summarise(damnpv = sum( dam / (1+delta)^t) ) %>%
+  full_join(pulse_size) %>% 
+  mutate(scc=damnpv/pulse_size ) %>% select(file,gas,delta,scc)
+  
 totcost <- totcosttime %>% 
   group_by(file,gas,delta) %>%
   summarise(implnpv = sum( (impl+dir)/(1+delta)^(t-1) ) ) %>% 
@@ -105,7 +116,8 @@ totcost <- totcosttime %>%
   full_join(damt) %>%
   full_join(damres) %>%
   full_join(pulse_size) %>%
-  mutate(costnpv=(termnpv+implnpv+damnpv)/pulse_size ) %>%
+  mutate(termnpv=termnpv/pulse_size,implnpv=implnpv/pulse_size,masknpv=masknpv/pulse_size ) %>%
+  mutate(costnpv=termnpv+implnpv+masknpv ) %>%
   group_by(file,gas,prob) %>%
   mutate(costnormd = costnpv/costnpv[delta==0.02]) %>%
   group_by(file,gas,delta) %>%
@@ -113,27 +125,6 @@ totcost <- totcosttime %>%
   group_by(file,gas) %>%
   mutate(costnorm = (costnpv)/costnpv[prob==0 & delta==0.02])
 
-
-
-scc <- tsec %>% 
-  filter(Variable=="T" & ghg=="co2" & masking=="no") %>%
-  rename(deltatemp = value) %>% 
-  select(t,gas,deltatemp) %>%
-  inner_join(temp %>% 
-               select(t,rcp,temp,initial_conditions)) %>%
-  mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
-  ungroup() %>% 
-  cross_join(data.frame(delta=c(seq(0,0.009,by=0.001),seq(0.01,0.05,by=0.01)))) %>%
-  cross_join(data.frame(sensdam= c(seq(0.5,2,by=0.5),5))) %>%
-  rowwise() %>% mutate(gwpt = min(gwpmax,gwp* (1 + 0.022)^(t-1)) ) %>%
-  group_by(gas,delta,sensdam) %>%
-  summarise(scc = sum( gwpt * ( (1- 1 / (1+alpha*sensdam*(temp+deltatemp)^powerdam)) - (1- 1 / (1+alpha*sensdam*(temp)^powerdam )) ) /(1+delta)^(t-1) ) ) 
-
-GWP <- tsec %>% 
-  filter(Variable=="forc" & masking=="no") %>%
-  group_by(file,gas) %>%
-  summarise(gwp=sum(value)) %>%
-  ungroup() %>% mutate(gwp=gwp/gwp[gas=="co2"])
 
 ####### figure 1
 temperature1 <- ggplot(tsec %>% 
@@ -193,10 +184,10 @@ forcing2 <- ggplot(tsec %>%
 forcing <- ggpubr::ggarrange(forcing1+theme(legend.position = "none"),forcing2+theme(legend.position = "none"))
 
 fig1 <- ggpubr::ggarrange(temperature,forcing)
-ggsave("figure_1.svg",width=18,height=9,path=respath,plot=fig1)
+ggsave("figure_1.svg",width=11,height=5.5,path=respath,plot=fig1)
 
 fig2a <- ggplot(totcost %>% 
-                  filter(delta > 0.01) ) +
+                  filter(delta >= 0.01) ) +
   geom_line(data=.%>% filter(prob==0),aes(x=delta*100,
                 y=costnormd,
                 color=gas ),
@@ -241,11 +232,11 @@ fig2b <- ggplot(totcost %>% filter(delta>=0.01)) +
 fig2 <- ggpubr::ggarrange(fig2a,fig2b,nrow=1,common.legend = TRUE)
 ggsave("figure_2.svg",width=11,height=5.5,path=respath,plot=fig2)
 
-totcost %>% filter(delta == 0.02 & prob==0)
-
-totcost %>% filter(delta == 0.01 & prob==0) 
+totcost %>% filter(delta == 0.01 & prob==0.05)
 
 totcost %>% filter(delta == 0.05 & prob==0) 
+
+totcost %>% filter(delta == 0.06 & prob==0) 
 
 totcost %>% 
   filter(delta >= 0.01) %>% 
@@ -259,9 +250,20 @@ totcost %>%
   xlab('Probability of termination (%/decade)') + theme_classic()
 
 totcost %>% 
-  filter(delta >= 0.01 & gas=="co2") %>% 
+  filter(delta >= 0.01) %>% 
+  inner_join(scc) %>%
   ggplot() + 
   #geom_raster(aes(x=prob,y=delta,fill=abs(log(costnorm) ) ) ) + 
+  geom_contour_filled(aes(x=prob*100,y=delta*100,z=costnpv/scc) )  +
+  geom_contour(aes(x=prob*100,y=delta*100,z=costnpv/scc) )  +
+  facet_wrap(gas~.,scales="free") +
+  scale_fill_viridis_d() + scale_color_viridis_c() + 
+  ylab('Discount rate (%)') +
+  xlab('Probability of termination (%/decade)') + theme_classic()
+
+totcost %>% 
+  filter(delta >= 0.01 & gas=="co2") %>% 
+  ggplot() + 
   geom_contour_filled(aes(x=prob*100,y=delta*100,z=costnpv) )  +
   geom_contour(aes(x=prob*100,y=delta*100,z=costnpv) )  +
   facet_wrap(gas~.,scales="free") +
