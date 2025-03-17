@@ -22,11 +22,11 @@ scalar tstep "time-step of the model" /1/;
 
 set t_rcp /1765*2500/;
 set thisttot(t_rcp,t);
-thisttot(t_rcp,t)$( (1760 + t.val*tstep) ge (t_rcp.val-tstep/2) and (1760 + t.val*tstep) lt (t_rcp.val+tstep/2) ) = yes;
+thisttot(t_rcp,t)$( (1765 - tstep + t.val*tstep) ge (t_rcp.val-tstep/2) and (1765 - tstep + t.val*tstep) lt (t_rcp.val+tstep/2) ) = yes;
 
-set t_proj /2018*2500/;
+set t_proj /2020*2500/;
 set tprojtot(t_proj,t);
-tprojtot(t_proj,t)$( (2015 + t.val*tstep) ge (t_proj.val-tstep/2) and (2015 + t.val*tstep) lt (t_proj.val+tstep/2) ) = yes;
+tprojtot(t_proj,t)$( (2020 - tstep + t.val*tstep) ge (t_proj.val-tstep/2) and (2020  - tstep + t.val*tstep) lt (t_proj.val+tstep/2) ) = yes;
 
 
 scalar delta "Delta for smooth approximation" /1e-8/; 
