@@ -16,3 +16,4 @@
 *.docx
 
 Paper and figures/
+!Results/*EXPpulse*.gdx
