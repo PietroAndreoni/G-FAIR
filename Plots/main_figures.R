@@ -64,7 +64,7 @@ pulse_size <- tsec %>% filter(Variable=="emi" & masking=="yes") %>%
   mutate(pulse_size=ifelse(gas=="co2",pulse_size*1e9,pulse_size*1e6))
 
 totcosttime <- tsec %>% 
-  filter(Variable=="forc" & ghg=="sai" & masking=="yes") %>%
+  filter(Variable=="forc" & ghg=="srm" & masking=="yes") %>%
   mutate(value=-value) %>%
   inner_join(tsec %>% 
                filter(Variable=="T" & ghg=="co2" & masking=="no") %>%
@@ -152,7 +152,7 @@ temperature2 <- ggplot(tsec %>%
 temperature <- ggpubr::ggarrange(temperature1,temperature2)
 
 forcing1 <- ggplot(tsec %>% 
-                    filter(Variable=="forc" & t<76 & masking=="yes" & ghg=="sai") %>%
+                    filter(Variable=="forc" & t<76 & masking=="yes" & ghg=="srm") %>%
                     group_by(t,gas,masking) %>%
                     summarise(value=sum(-value))) +
   geom_line(aes(x=2019+t,
@@ -166,7 +166,7 @@ forcing1 <- ggplot(tsec %>%
   theme(legend.position="none")
 
 forcing2 <- ggplot(tsec %>% 
-                     filter(Variable=="forc" & t>200 & masking=="yes" & ghg=="sai") %>%
+                     filter(Variable=="forc" & t>200 & masking=="yes" & ghg=="srm") %>%
                      group_by(t,gas,masking) %>%
                      summarise(value=sum(-value))) +
   geom_line(aes(x=2019+t,

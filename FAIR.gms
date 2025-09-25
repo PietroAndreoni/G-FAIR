@@ -38,7 +38,6 @@ set box "boxes for co2 concentration module"
 
 set ghg "Greenhouse gases" /'co2', 'ch4', 'n2o', 'h2o', 'o3trop'/;
 set pre "Precursor gases (that are not ghgs)" /'co','no_x','nmvoc'/; 
-
 set cghg(ghg) "Core greenhouse gases";
 set oghg(ghg) "Other well-mixed greenhouse gases with emission and concentration represenation";
 set preghg(ghg) "Other greenhouse gases without emission and concentration represenation";
@@ -84,6 +83,7 @@ PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"
                    natural_emissions(ghg,t) "Emissions from natural sources for non co2 gasses"
                    wemi_pre(pre,t)          "Emissions of precursor gases"
                    forcing_exogenous(t) "Exogenous forcing from natural sources and exogenous oghgs [W/m2]"
+                   forcing_srm(t) "Exogenous forcing from solar radiation management [W/m2]"
                    target_temp(t) "Target temperature";
 
 PARAMETER ghg_mm(*) "Molecular mass of greenhouse gases (kg mol-1)";
@@ -195,9 +195,9 @@ eq_forco3trop(t)..      FORCING('o3trop',t) =E= 1.74e-4 * (CONC('ch4',t) - conc_
 eq_forcoghg(oghg,t)$(active(oghg))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
-eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - SRM(t) ) * ( 1 - exp(-tstep/dslow) );
+eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - forcing_srm(t) - SRM(t) ) * ( 1 - exp(-tstep/dslow) );
 
-eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - SRM(t) ) * ( 1 - exp(-tstep/dfast) );
+eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - forcing_srm(t) - SRM(t) ) * ( 1 - exp(-tstep/dfast) );
 
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
@@ -259,13 +259,7 @@ active(ghg) = yes;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
-
-save_base(ghg,t,'emi') = W_EMI.l(ghg,t);
-save_base(ghg,t,'conc') = CONC.l(ghg,t);
-save_base(ghg,t,'forc') = FORCING.l(ghg,t);
-save_base(ghg,t,'T') = TATM.l(t);
-save_base(ghg,t,'IRF') = IRF.l(t);
 execute_unload "Results/%rcp%_EXPsimulation_IC%initial_conditions%.gdx";
 
 ***** run some experiments
-$if set experiment_ghg $batinclude "experiments/GHGs.gms" "%experiment_ghg%" "%gas%"
+$if set experiment $batinclude "experiments/%experiment%.gms" "%gas%"
