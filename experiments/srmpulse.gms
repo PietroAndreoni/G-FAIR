@@ -13,6 +13,7 @@ forcing_srm(t)$(2020 + t.val ge %start_rampup% and 2020 + t.val le %end_rampup%)
 forcing_srm(t)$(2020 + t.val gt %end_rampup% and 2020 + t.val le %start_rampdown%) = %rate_of_cooling% * forc2x / Tecs * (%end_rampup% - 2030) / 1e3;
 forcing_srm(t)$(2020 + t.val gt %start_rampdown% and 2020 + t.val le %end_rampdown%) = %rate_of_cooling% * forc2x / Tecs * (%end_rampup% - 2030) / 1e3 - %rate_of_cooling% * forc2x / Tecs * (2020 + t.val - %start_rampdown%) / 1e3;
 forcing_srm(t)$(forcing_srm(t) le 0) = 0;
+$if not set srm_exogenous forcing_srm(t) = 0;
 
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
@@ -25,9 +26,10 @@ save_base(ghg,t,'T') = TATM.l(t);
 save_base(ghg,t,'IRF') = IRF.l(t);
 save_base(ghg,t,'srm') = forcing_srm(t)+SRM.l(t);
 
+execute_unload "Results/%rcp%_EXP%experiment%_GAS%gas%_PT%pulse_time%_PS%pulse_size%_RC%rate_of_cooling%_EC%end_rampdown%";
 
 ***** emission pulse, co2
-W_EMI.fx('%gas%','%pulse_time%') = (1 + %pulse_size%/100 ) *W_EMI.l('%gas%','%pulse_time%');
+W_EMI.fx('%gas%','%pulse_time%') = (1 + %pulse_size%/100 ) * W_EMI.l('%gas%','%pulse_time%');
 
 $if set srm SRM.lo(t) = -inf; SRM.up(t) = +inf;
 target_temp(t) = TATM.l(t);
@@ -43,13 +45,12 @@ $if set srm save_delta(ghg,t,'srm') = forcing_srm(t)+SRM.l(t)-save_base(ghg,t,'s
 save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
 save_delta(ghg,t,'IRF') = IRF.l(t)-save_base(ghg,t,'IRF');
 
-$if not set srm execute_unload "Results/%rcp%_EXP%experiment%_GAS%gas%_PT%pulse_time%_PS%pulse_size%_RC%rate_of_cooling%_IC%initial_conditions%";
-$if set srm execute_unload "Results/%rcp%_EXP%experiment%masked_GAS%gas%_PT%pulse_time%_PS%pulse_size%_RC%rate_of_cooling%_IC%initial_conditions%";
+execute_unload "Results/%rcp%_EXP%experiment%masked_GAS%gas%_PT%pulse_time%_PS%pulse_size%_RC%rate_of_cooling%_EC%end_rampdown%";
 
 $ifthen.trem set removal_time 
 
 * remove the same amount pulsed at t2 at tremoval
-W_EMI.fx('%gas%','%removal_time%') = W_EMI.l('%gas%','%removal_time%') - %pulse_size%/100 * W_EMI.l('%gas%','%pulse_time%');
+W_EMI.fx('%gas%','%removal_time%') = W_EMI.l('%gas%','%removal_time%') - %pulse_size%/100 * W_EMI.l('%gas%','%pulse_time%') / (1 + %pulse_size%/100 );
 
 solve fair using nlp minimizing OBJ;
 solve fair using nlp minimizing OBJ;
@@ -60,8 +61,7 @@ save_delta(ghg,t,'forc') = FORCING.l(ghg,t)-save_base(ghg,t,'forc');
 save_delta(ghg,t,'T') = TATM.l(t)-save_base(ghg,t,'T');
 save_delta(ghg,t,'IRF') = IRF.l(t)-save_base(ghg,t,'IRF');
 
-$if not set srm execute_unload "Results/%rcp%_EXP%experiment_ghg%_GAS%gas%_REM%removal_time%_PT%pulse_time%_PS%pulse_size%_RC%rate_of_cooling%_IC%initial_conditions%";
-$if set srm execute_unload "Results/%rcp%_EXP%experiment_ghg%masked_REM%removal_time%_GAS%gas%_REM%removal_time%_PT%pulse_time%_PS%pulse_size%_RC%rate_of_cooling%_IC%initial_conditions%";
+execute_unload "Results/%rcp%_EXP%experiment_ghg%masked_REM%removal_time%_GAS%gas%_REM%removal_time%_RC%rate_of_cooling%_EC%end_rampdown%";
 
 $endif.trem
 
