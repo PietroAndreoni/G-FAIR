@@ -122,7 +122,7 @@ VARIABLES QSLOW, QFAST;
 **** IMPORTANT PROGRAMMING NOTE. Earlier implementations has reservoirs as non-negative.
 **** However, these are not physical but mathematical solutions.
 **** So, they need to be unconstrained so that can have negative emissions.
-POSITIVE VARIABLES   CONC, IRF, alpha, FF_CH4, CUMEMI, SRM;
+POSITIVE VARIABLES   CONC, IRF, alpha, FF_CH4, SRM;
 
 EQUATIONS       
         eq_reslom           "Reservoir i law of motion"
@@ -230,7 +230,8 @@ option reslim = 99999;
 option solprint = on;
 option limrow = 0;
 option limcol = 0;
- 
+option nlp = conopt3; #by default: use CONOPT3
+
 model fair / all /;
 fair.OptFile = 1;
 
