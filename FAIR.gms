@@ -28,7 +28,7 @@ set tprojtot(t_proj,t);
 tprojtot(t_proj,t)$( (2020 - tstep + t.val*tstep) ge (t_proj.val-tstep/2) and (2020  - tstep + t.val*tstep) lt (t_proj.val+tstep/2) ) = yes;
 
 
-scalar delta "Delta for smooth approximation" /1e-8/; 
+scalar delta "Delta for smooth approximation" /1e-3/; 
 
 set box "boxes for co2 concentration module"
                                 /     "geological processes",
@@ -208,7 +208,7 @@ eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box)
 eq_irfrhs(t)$(active('co2'))..    IRF(t)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
                                                     sqrt( sqr(irf_max - (irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) + sqr(delta) ) ) / 2;
 
-eq_obj..          OBJ =E= sum(t,sqr((TATM(t)-target_temp(t)) ) );
+eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
 
 **  Upper and lower bounds for stability
 CONC.LO(cghg,t) = 1e-9;
@@ -233,7 +233,6 @@ option limcol = 0;
 option nlp = conopt3; #by default: use CONOPT3
 
 model fair / all /;
-fair.OptFile = 1;
 
 ** find QSLOW and QFAST given TCR, ECS, and forc2x parameters 
 $batinclude "Input/pre_find_Qs.gms"
@@ -252,15 +251,10 @@ $batinclude "Model/initialization.gms"
 
 $if set no_oforc forcing_exogenous(t) = 0;
 
-parameter save_base(ghg,t,*);
-parameter save_delta(ghg,t,*);
-
 *** solve the basic model
 active(ghg) = yes;
 solve fair using nlp minimizing OBJ;
-solve fair using nlp minimizing OBJ;
-solve fair using nlp minimizing OBJ;
-execute_unload "Results/%rcp%_EXPsimulation_IC%initial_conditions%.gdx";
+execute_unload "Results/%rcp%_EXPbase_IC%initial_conditions%.gdx";
 
 ***** run some experiments
 $if set experiment $batinclude "experiments/%experiment%.gms" "%gas%"
