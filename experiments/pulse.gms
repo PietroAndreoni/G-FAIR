@@ -1,6 +1,6 @@
 $set gas %1
 
-$setglobal pulse_size 1 #percentage increase in emissions
+$setglobal pulse_size 10 #percentage increase in emissions
 $setglobal pulse_time 5 #year of pulse (1 is 2020)
 
 parameter dT(t),dW(t,ghg);

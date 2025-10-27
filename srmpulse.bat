@@ -1,7 +1,7 @@
 setlocal enabledelayedexpansion
 
 REM Define your variable (e.g., a list of filenames)
-set "gas=co2 ch4 n2o"
+set "gas=co2 ch4"
 set "rcp=RCP3PD RCP45 RCP6 RCP85"
 set "cool=5 10 20 40"
 set "timepulse=2 20 50"
@@ -28,7 +28,7 @@ for %%a in (%gas%) do (
                     REM Use delayed expansion to reference f (use !f!)
                     echo Running with cooling_rate=%%b start=%%e end=!f! 
 
-                    gams FAIR.gms --initial_conditions=historical_run --experiment=srm --gas=%%a --cooling_rate=%%b --start_rampdown=%%e --end_rampdown=!f! --rcp=%%c --pulse_time=%%d --srm_exogenous=1
+                    gams FAIR.gms --initial_conditions=historical_run --experiment=srm --gas=%%a --rate_of_cooling=%%b --start_rampdown=%%e --end_rampdown=!f! --rcp=%%c --pulse_time=%%d --srm_exogenous=1
                 
                 )
             )

@@ -40,7 +40,8 @@ dW(t,ghg) = W_EMI.l(ghg,t) - dW(t,ghg);
 execute_unload "Results/%rcp%_EXP%experiment%pulse_GAS%gas%_PT%pulse_time%_RC%rate_of_cooling%_EC%end_rampdown%";
 
 ** Scenario 3: with SRM, with emission pulse and masking
-SRM.lo(t) = -inf; SRM.up(t) = +inf;
+SRM.lo(t) = - forcing_srm(t); SRM.up(t) = +inf; # reduce the SAI by at most the full amount
+SRM.fx(t)$(t.val lt %pulse_time%) = 0; # and cannot change SAI before the pulse
 
 * solve 3 times as this is the only non-simulation problem
 solve fair using nlp minimizing OBJ;
@@ -49,6 +50,20 @@ solve fair using nlp minimizing OBJ;
 abort$(not (fair.solvestat eq 1 and (fair.modelstat eq 1 or fair.modelstat eq 2))) "Base model is not solving";
 
 execute_unload "Results/%rcp%_EXP%experiment%pulsemasked_GAS%gas%_PT%pulse_time%_RC%rate_of_cooling%_EC%end_rampdown%";
+
+$ifthen.tterm set termination_time 
+
+* fix strategy befre tterm
+SRM.fx(t)$(t.val le %termination_time%) = SRM.l(t); 
+* stop masking at tterm
+SRM.fx(t)$(t.val gt %termination_time%) = 0; 
+
+solve fair using nlp minimizing OBJ;
+abort$(not (fair.solvestat eq 1 and (fair.modelstat eq 1 or fair.modelstat eq 2))) "Base model is not solving";
+
+execute_unload "Results/%rcp%_EXP%experiment%pulsemaskedterm_GAS%gas%_PT%pulse_time%_TT%termination_time%_RC%rate_of_cooling%_EC%end_rampdown%";
+
+$endif.tterm
 
 $ifthen.trem set removal_time 
 
