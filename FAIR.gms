@@ -6,6 +6,7 @@ $onMulti
 $setglobal initial_conditions 'historical_run'
 $setglobal gas "co2"
 $setglobal rcp "RCP45"
+$setglobal results_folder "Results"
 *$setglobal no_oforc
 
 *** time
@@ -103,7 +104,7 @@ VARIABLES
         W_EMI(ghg,t)   "Global missions of greenhouse gas i (GtCO2/MtCH4/MtN20 per year)"
         CONC(ghg,t)    "Concentration of greenhouse gas i (ppm/ppb from 1765)"
         FORCING(ghg,t) "Increase in radiative forcing due to ghg i (watts per m2 from 1765)"
-        OXI_CH4(t)         "CO2 emissions from methane oxidation (GtC per year)"
+        OXI_CH4(t)     "CO2 emissions from methane oxidation (GtC per year)"
         FF_CH4(t)      "Fraction of fossil methane emissions"
         RES(box,t)     "Carbon concentration in Reservoir i (GtC from 1765)"
         TATM(t)        "Increase temperature of atmosphere (degrees L from 1765)"     
@@ -254,7 +255,7 @@ $if set no_oforc forcing_exogenous(t) = 0;
 *** solve the basic model
 active(ghg) = yes;
 solve fair using nlp minimizing OBJ;
-execute_unload "Results/%rcp%_EXPbase_IC%initial_conditions%.gdx";
+execute_unload "%results_folder%/%rcp%_EXPbase_ECS%ecs%_TCR%tcr%_IC%initial_conditions%.gdx";
 
 ***** run some experiments
 $if set experiment $batinclude "experiments/%experiment%.gms" "%gas%"

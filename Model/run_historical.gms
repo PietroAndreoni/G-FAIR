@@ -30,4 +30,4 @@ FORCING.fx(ghg,t)$(not active(ghg)) = sum(t_rcp,forcing_rcp(t_rcp,'%rcp%',ghg)$t
 FORCING.fx(ghg,t)$(ord(t) ge card(t_rcp) and not active(ghg)) = forcing_rcp('2500','%rcp%',ghg);
 
 solve fair using nlp minimizing OBJ;
-execute_unload "Results/historical_%rcp%.gdx";
+execute_unload "%results_folder%/historical_%rcp%.gdx";
