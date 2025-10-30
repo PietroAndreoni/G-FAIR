@@ -17,6 +17,10 @@ drawln <- function(median,std,plot=F) {
 generate_data <- T
 overwrite_data <- T
 res <- "Results_montecarlo"
+# Make sure the file exists (create it if not)
+if (!dir.exists(res)) {
+  dir.create(res)
+}
 
 if (generate_data==T) {
 
