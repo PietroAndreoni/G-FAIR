@@ -1,5 +1,9 @@
-# this scripts generates the realization for the montecarlo parameters
+# this scripts generates the realizations for the montecarlo parameters
+# generates a script with all the scenarios to run (excluding those with results)
+# and runs the scenarios in batches 
 require(dplyr)
+require(stringr)
+
 drawln <- function(median,std,plot=F) {
   location <- log(median)#log(m^2 / sqrt(s^2 + m^2))
   y <- (1 + sqrt(1 + 4 * (std^2 / median^2))) / 2
@@ -14,9 +18,23 @@ drawln <- function(median,std,plot=F) {
   return(rlnorm(n = 1, location, shape))
 }
 
-generate_data <- T
-overwrite_data <- T
+generate_data <- F # generate new data
+overwrite_data <- F #overwrite old data
+n_scenarios <- 1000 # number of (new) scenarios to generate
+run_batch <- T # run scenarios that are already not in the results folder in batches (limit nodes usage)
+run_hpc <- T # run from juno (F for local machine)
 res <- "Results_montecarlo"
+
+# Define the path to the .ssh file
+sh_file <- "Montecarlo.sh"   # or any other file you want to modify
+
+# Make sure the file exists (create it if not)
+if (!file.exists(sh_file)) {
+  file.create(sh_file)
+} else {
+  file.remove(sh_file)
+  file.create(sh_file)}
+
 # Make sure the file exists (create it if not)
 if (!dir.exists(res)) {
   dir.create(res)
@@ -28,7 +46,7 @@ if (overwrite_data==T) {data <- data.frame()} else {data <-  as.data.frame(read.
 
 max_id <- nrow(data)
 
-for (i in seq(1,10000,by=1)) {
+for (i in seq(1,n_scenarios,by=1)) {
 # climate equilibrium sensitivity
   ecs <- round(drawln(3.14,2)*10,0)
 
@@ -59,11 +77,15 @@ for (i in seq(1,10000,by=1)) {
   alpha <- round(drawln(0.00575,0.00575*150/(230-100)),5)
 
 # delta 
-  delta <- sample(seq(0,0.07,by=0.01),1)
+  delta <- sample(seq(0,0.1,by=0.01),1)
 
 # prob 
-  prob <- sample(seq(0,0.1,by=0.01),1)
+  prob <- sample(seq(0,1,by=0.05),1)
 
+# time of termination event 
+  time_term <- sample(seq(10,500,by=10),1)
+  
+  
   data <- data %>% 
     bind_rows(data.frame(ID=i+max_id,
                        ecs=ecs,
@@ -76,6 +98,7 @@ for (i in seq(1,10000,by=1)) {
                        theta=theta,
                        alpha=alpha,
                        delta=delta,
+                       term_delta=time_term,
                        prob=prob) ) }
 
 write.csv(data,file="id_montecarlo.csv") } else {
@@ -86,14 +109,23 @@ data <- as.data.frame(read.csv("id_montecarlo.csv")) %>% select(-X)
  
 # select unique scenarios 
 data_srmpulse <- data %>% 
-  select(ecs, tcr, rcp, pulse, cool, term, start) %>% unique() %>% 
+  select(ecs, tcr, rcp, pulse, cool, term, start, term_delta) %>% unique() %>% 
   mutate()
 
+data_pulse <- data %>% 
+  select(ecs, tcr, rcp, pulse) %>% 
+  unique() 
+
+filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
+
+for (gas in c("ch4","co2")) {
+  
 for (i in seq(1,nrow(data_srmpulse)) ) {
 bsub <- paste("bsub", "-q p_short", "-n 1",
-              "-P  0638", paste0("-J scenariosrmpulse_", i), "-K -M 64G")
+              "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
 
 gams <- paste0("gams FAIR.gms --experiment=srm",
+               " --gas=",gas,
               " --ecs=",data_srmpulse[i,]$ecs,
               " --tcr=",data_srmpulse[i,]$tcr,
               " --rcp=",data_srmpulse[i,]$rcp,
@@ -102,49 +134,59 @@ gams <- paste0("gams FAIR.gms --experiment=srm",
               " --start_rampdown=",data_srmpulse[i,]$term,
               " --end_rampdown=",data_srmpulse[i,]$term+100,
               " --start_rampup=",data_srmpulse[i,]$start,
-              " --end_rampup=",data_srmpulse[i,]$start+100)
-command <- paste(bsub, gams)
-# command <- gams
-ret <- system(command = command, intern = TRUE)
+              " --end_rampup=",data_srmpulse[i,]$start+100,
+              " --termination_time=",data_srmpulse[i,]$term_delta,
+              " --results_folder=",res)
 
-for (t in seq(10,100,by=10)) {
-  bsub <- paste("bsub", "-q p_short", "-n 1",
-                "-P 0638", paste0("-J scenariosrmpulse_", i,"TERM",t), "-K -M 64G")
-  
-  gams <- paste0("gams FAIR.gms --experiment=srm",
-                 " --ecs=",data_srmpulse[i,]$ecs,
-                 " --tcr=",data_srmpulse[i,]$tcr,
-                 " --rcp=",data_srmpulse[i,]$rcp,
-                 " --pulse_time=",data_srmpulse[i,]$pulse,
-                 " --rate_of_cooling=",data_srmpulse[i,]$cool,
-                 " --start_rampdown=",data_srmpulse[i,]$term,
-                 " --end_rampdown=",data_srmpulse[i,]$term+100,
-                 " --start_rampup=",data_srmpulse[i,]$start,
-                 " --end_rampup=",data_srmpulse[i,]$start+100,
-                 " --termination_time=",t,
-                 " --results_folder=",res)
+results_name <-  paste0(data_srmpulse[i,]$rcp,
+                        "_EXPsrmpulsemasked_",
+                        "_GAS",gas,
+                        "ECS_",data_srmpulse[i,]$ecs,
+                        "_TCR",data_srmpulse[i,]$tcr,
+                        "_PT",data_srmpulse[i,]$pulse,
+                        "_RC",data_srmpulse[i,]$cool,
+                        "_EC",data_srmpulse[i,]$term,
+                        "_BC",data_srmpulse[i,]$start,
+                        "_IChistorical_run")
+
+if (!any(str_detect(filelist,results_name)) ) {
   command <- paste(bsub, gams)
-  # command <- gams
-  ret <- system(command = command, intern = TRUE)
-}
+  write(str_remove(command, "-K "), file = sh_file, append = TRUE)
+  if (run_hpc==F) {command <- gams}
+  if (run_batch==T) {ret <- system(command = command, intern = TRUE)}
+  }
 
 }
-
-data_pulse <- data %>% 
-  select(ecs, tcr, rcp, pulse) %>% 
-  unique() 
 
 for (i in seq(1,nrow(data_pulse)) ) {
   bsub <- paste("bsub", "-q p_short", "-n 1",
-                "-P 0588", paste0("-J scenariopulse_", i), "-K -M 64G")
+                "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
   
   gams <- paste0("gams FAIR.gms --experiment=pulse",
+                 " --gas=",gas,
                  " --ecs=",data_pulse[i,]$ecs,
                  " --tcr=",data_pulse[i,]$tcr,
                  " --rcp=",data_pulse[i,]$rcp,
-                 " --pulse_time=",data_pulse[i,]$pulse)
-  command <- paste(bsub, gams)
-  # command <- gams
-  ret <- system(command = command, intern = TRUE)
+                 " --pulse_time=",data_pulse[i,]$pulse,
+                 " --results_folder=",res)
+  
+  results_name <-  paste0(data_srmpulse[i,]$rcp,
+                          "_GAS",gas,
+                          "_EXPpulse",
+                          "_ECS_",data_srmpulse[i,]$ecs,
+                          "_TCR",data_srmpulse[i,]$tcr,
+                          "_PT",data_srmpulse[i,]$pulse,
+                          "_IChistorical_run")
+  
+  if (!any(str_detect(filelist,results_name)) ) {
+    command <- paste(bsub, gams)
+    write(str_remove(command, "-K "), file = sh_file, append = TRUE)
+    if (run_hpc==F) {command <- gams}
+    if (run_batch==T) {ret <- system(command = command, intern = TRUE)}
+    }
+  
 }
+  
+}
+
 
