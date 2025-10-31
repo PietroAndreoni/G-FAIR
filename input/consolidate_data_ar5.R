@@ -1,4 +1,5 @@
-require(tidyverse)
+require(dplyr)
+require(stringr)
 require(janitor)
 
 # extract emissions
@@ -7,7 +8,7 @@ files <- paste0("data/", list.files(path="./data",pattern = "\\.csv$")) %>%
 emissions_rcps <- tibble()
 for (file in files){
 emissions_rcps <- emissions_rcps %>%
-  bind_rows(read_csv(file) %>%
+  readr::bind_rows(read_csv(file) %>%
   slice(36:n()) %>%
   row_to_names(1) %>%
   rename(year=`v YEARS/GAS >`) %>%
@@ -17,7 +18,7 @@ emissions_rcps <- emissions_rcps %>%
 }
 
 #units for emissions
-units_emissions <- read_csv(files[1]) %>%
+units_emissions <- readr::read_csv(files[1]) %>%
   slice(36:35) %>%
   row_to_names(1) %>%
   select(-1) %>%
@@ -36,7 +37,7 @@ files <- paste0("data/", list.files(path="./data",pattern = "\\.csv$")) %>%
 forcing_rcps <- tibble()
 for (file in files){
   forcing_rcps <- forcing_rcps %>%
-    bind_rows(read_csv(file) %>%
+    bind_rows(readr::read_csv(file) %>%
                 slice(58:n()) %>%
                 row_to_names(1) %>%
                 rename(year=`v YEARS/GAS >`) %>%
@@ -52,7 +53,7 @@ forcing_rcps <- forcing_rcps %>%
 # extract fraction of methane fossil emissions 
 methane_fraction <- paste0("data/", list.files(path="./data",pattern = "\\.csv$")) %>%
   str_subset("fossilCH4_fraction") %>%
-  read_csv() %>%
+  readr::read_csv() %>%
   slice(4:n()) %>%
   row_to_names(1) %>%
   mutate_all(~as.numeric(.)) %>%
@@ -63,7 +64,7 @@ methane_fraction <- paste0("data/", list.files(path="./data",pattern = "\\.csv$"
 
 natural_emissions <- paste0("data/", list.files(path="./data",pattern = "\\.csv$")) %>%
   str_subset("natural") %>%
-  read_csv() %>% 
+  readr::read_csv() %>% 
   slice(4:n()) %>%
   separate(col=1,into=c("year","ch4","n2o"), sep="[ \t]+") %>%
   mutate_all(~as.numeric(.)) %>%
