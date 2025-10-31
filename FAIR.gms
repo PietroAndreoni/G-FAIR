@@ -236,10 +236,10 @@ option nlp = conopt3; #by default: use CONOPT3
 model fair / all /;
 
 ** find QSLOW and QFAST given TCR, ECS, and forc2x parameters 
-$batinclude "Input/pre_find_Qs.gms"
+$batinclude "input/pre_find_Qs.gms"
 
 ** find natural emissions that grant pre-industrial equilbrium of concentrations for ch4 and n2o
-$if set neutral_natemi $batinclude "Input/pre_find_natemi.gms"
+$if set neutral_natemi $batinclude "input/pre_find_natemi.gms"
 
 *** include forcing from natural sources and exogenous 
 $batinclude "Model/exogenous_forcing.gms"
