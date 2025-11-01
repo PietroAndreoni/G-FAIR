@@ -21,8 +21,11 @@ drawln <- function(median,std,plot=F) {
 generate_data <- F # generate new data
 overwrite_data <- F #overwrite old data
 n_scenarios <- 1000 # number of (new) scenarios to generate
-run_batch <- T # run scenarios that are already not in the results folder in batches (limit nodes usage)
+run_batch <- T # run scenarios 
+run_parallel <- F # launches all scenarios in parallel (careful not to flood Juno..)
 run_hpc <- T # run from juno (F for local machine)
+start_job <- 250 # beginning of 
+end_job <- 300
 res <- "Results_montecarlo"
 
 # Define the path to the .ssh file
@@ -120,7 +123,7 @@ filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 
 for (gas in c("ch4","co2")) {
   
-for (i in seq(1,nrow(data_srmpulse)) ) {
+for (i in seq(start_job,min(end_job,nrow(data_srmpulse))) ) {
 bsub <- paste("bsub", "-q p_short", "-n 1",
               "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
 
@@ -150,6 +153,7 @@ results_name <-  paste0(data_srmpulse[i,]$rcp,
                         "_IChistorical_run")
 
 if (!any(str_detect(filelist,results_name)) ) {
+  if (run_parallel==T) {bsub <- str_remove(bsub, "-K ")}
   command <- paste(bsub, gams)
   write(str_remove(command, "-K "), file = sh_file, append = TRUE)
   if (run_hpc==F) {command <- gams}
@@ -158,9 +162,9 @@ if (!any(str_detect(filelist,results_name)) ) {
 
 }
 
-for (i in seq(1,nrow(data_pulse)) ) {
+for (i in seq(start_job,min(end_job,nrow(data_pulse))) ) {
   bsub <- paste("bsub", "-q p_short", "-n 1",
-                "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
+                "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-M -K 64G")
   
   gams <- paste0("gams FAIR.gms --experiment=pulse",
                  " --gas=",gas,
@@ -179,6 +183,7 @@ for (i in seq(1,nrow(data_pulse)) ) {
                           "_IChistorical_run")
   
   if (!any(str_detect(filelist,results_name)) ) {
+    if (run_parallel==T) {bsub <- str_remove(bsub, "-K ")}
     command <- paste(bsub, gams)
     write(str_remove(command, "-K "), file = sh_file, append = TRUE)
     if (run_hpc==F) {command <- gams}
@@ -188,5 +193,7 @@ for (i in seq(1,nrow(data_pulse)) ) {
 }
   
 }
+
+
 
 

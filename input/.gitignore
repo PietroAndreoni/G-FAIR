@@ -1,0 +1,20 @@
+*.gdx
+!input/*.gdx
+*.lst
+*.lxi
+*.log
+*.log~1
+*.log~2
+*.log~3
+225a/
+.Rproj.user
+*.png
+*.RData
+*.Rhistory
+*.Rproj
+
+*.docx
+
+Paper and figures/
+
+225*/
