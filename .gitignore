@@ -20,3 +20,7 @@ Paper and figures/
 225*/
 
 id_montecarlo.csv
+
+*.swp
+
+Montecarlo.sh
