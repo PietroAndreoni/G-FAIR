@@ -45,7 +45,7 @@ if (!dir.exists(res)) {
 
 if (generate_data==T) {
 
-if (overwrite_data==T) {data <- data.frame()} else {data <-  as.data.frame(read.csv("id_montecarlo.csv")) %>% select(-X)}
+if (overwrite_data==T) {data <- data.frame()} else {data <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% select(-X)}
 
 max_id <- nrow(data)
 
@@ -104,9 +104,9 @@ for (i in seq(1,n_scenarios,by=1)) {
                        term_delta=time_term,
                        prob=prob) ) }
 
-write.csv(data,file="id_montecarlo.csv") } else {
+write.csv(data,file=paste0(res,"/id_montecarlo.csv")) } else {
   
-data <- as.data.frame(read.csv("id_montecarlo.csv")) %>% select(-X)
+data <- as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"))) %>% select(-X)
 
 }
  
