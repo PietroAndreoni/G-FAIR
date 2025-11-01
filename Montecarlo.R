@@ -20,16 +20,16 @@ drawln <- function(median,std,plot=F) {
 
 generate_data <- F # generate new data
 overwrite_data <- F #overwrite old data
-n_scenarios <- 1000 # number of (new) scenarios to generate
+n_scenarios <- 5 # number of (new) scenarios to generate
 run_batch <- T # run scenarios 
 run_parallel <- F # launches all scenarios in parallel (careful not to flood Juno..)
-run_hpc <- T # run from juno (F for local machine)
-start_job <- 250 # beginning of 
-end_job <- 300
-res <- "Results_montecarlo"
+run_hpc <- F # run from juno (F for local machine)
+start_job <- 1 # beginning of 
+end_job <- 5
+res <- "Results_montecarlo_mini"
 
 # Define the path to the .ssh file
-sh_file <- "Montecarlo.sh"   # or any other file you want to modify
+sh_file <- paste0(res,"/Montecarlo.sh" )  # or any other file you want to modify
 
 # Make sure the file exists (create it if not)
 if (!file.exists(sh_file)) {
@@ -193,7 +193,4 @@ for (i in seq(start_job,min(end_job,nrow(data_pulse))) ) {
 }
   
 }
-
-
-
 
