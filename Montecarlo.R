@@ -4,6 +4,27 @@
 require(dplyr)
 require(stringr)
 
+# Usage
+'Launch montecarlo script for SRM substitution pulse analysis
+
+Usage:
+  Montecarlo.R [-g <generate_data>] [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
+
+Options:
+-o <res>              Path where the results are (default: Results)
+-n <n_scenarios>      Number of new scenarios to generate
+-g <generate_data>    T/F to generate new realizations
+-w <overwrite_data>   T/F to overwrite old realizations
+-r <run_scenarios>    T/F to run or just generate scenarios (in .sh script)
+-p <run_parallel>     T/F if to run in parallel or in series (for Juno)
+-h <run_hpc>          T/F if to run on Juno or local (windows)
+-s <start_job>        Number of line to start calling the scenarios 
+-e <end_job>          End of line to start calling the scenarios
+' -> doc
+
+library(docopt)
+arguments <- docopt(doc, version = 'Montecarlo')
+
 drawln <- function(median,std,plot=F) {
   location <- log(median)#log(m^2 / sqrt(s^2 + m^2))
   y <- (1 + sqrt(1 + 4 * (std^2 / median^2))) / 2
@@ -18,18 +39,23 @@ drawln <- function(median,std,plot=F) {
   return(rlnorm(n = 1, location, shape))
 }
 
-generate_data <- F # generate new data
-overwrite_data <- F #overwrite old data
-n_scenarios <- 5 # number of (new) scenarios to generate
-run_batch <- T # run scenarios 
-run_parallel <- F # launches all scenarios in parallel (careful not to flood Juno..)
-run_hpc <- F # run from juno (F for local machine)
-start_job <- 1 # beginning of 
-end_job <- 5
-res <- "Results_montecarlo_mini"
+# logical
+generate_data = ifelse(is.null(opts[["g"]]), T, as.logical(opts["g"]) )
+overwrite_data = ifelse(is.null(opts[["o"]]), F, as.logical(opts["o"]) )
+run_scenarios = ifelse(is.null(opts[["r"]]), T, as.logical(opts["p"]) )
+run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["r"]) )
+run_hpc = ifelse(is.null(opts[["h"]]), F, as.logical(opts["h"]) )
+
+# numeric
+n_scenarios = ifelse(is.null(opts[["n"]]), 1000, as.numeric(opts["n"]) )
+start_job = ifelse(is.null(opts[["s"]]), 1, as.numeric(opts["s"]) )
+end_job = ifelse(is.null(opts[["e"]]), 1000, as.numeric(opts["e"]) )
+
+# strings
+res = ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts["o"]) )
 
 # Define the path to the .ssh file
-sh_file <- paste0(res,"/Montecarlo.sh" )  # or any other file you want to modify
+sh_file <- paste0(res,"/montecarlo.sh" ) 
 
 # Make sure the file exists (create it if not)
 if (!file.exists(sh_file)) {
@@ -42,6 +68,9 @@ if (!file.exists(sh_file)) {
 if (!dir.exists(res)) {
   dir.create(res)
 }
+
+
+cat("Generating data...")
 
 if (generate_data==T) {
 
@@ -119,6 +148,8 @@ data_pulse <- data %>%
   select(ecs, tcr, rcp, pulse) %>% 
   unique() 
 
+cat("Launching jobs...")
+
 filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 
 for (gas in c("ch4","co2")) {
@@ -157,7 +188,7 @@ if (!any(str_detect(filelist,results_name)) ) {
   command <- paste(bsub, gams)
   write(str_remove(command, "-K "), file = sh_file, append = TRUE)
   if (run_hpc==F) {command <- gams}
-  if (run_batch==T) {ret <- system(command = command, intern = TRUE)}
+  if (run_scenarios==T) {ret <- system(command = command, intern = TRUE)}
   }
 
 }
@@ -187,7 +218,7 @@ for (i in seq(start_job,min(end_job,nrow(data_pulse))) ) {
     command <- paste(bsub, gams)
     write(str_remove(command, "-K "), file = sh_file, append = TRUE)
     if (run_hpc==F) {command <- gams}
-    if (run_batch==T) {ret <- system(command = command, intern = TRUE)}
+    if (run_scenarios==T) {ret <- system(command = command, intern = TRUE)}
     }
   
 }

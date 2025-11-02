@@ -1,11 +1,12 @@
 library(gdxtools)
 library(dplyr)
+library(stringr)
 
-extract_names <- function(.x,resdir) {
+extract_names <- function(.x,res) {
   .x %>% 
     as_tibble() %>% 
-    mutate(file=str_remove_all(gdx,paste0(resdir,"/|.gdx")),
-           path=resdir,
+    mutate(file=str_remove_all(gdx,paste0(res,"/|.gdx")),
+           path=res,
            gas=str_extract(file,"(?<=GAS).+?(?=_)"),
            rcp=str_extract(file,"(?<=RCP).+?(?=_)"),
            cool_rate=str_extract(str_remove(file,"RCP"),"(?<=RC).+?(?=_)"),
@@ -23,17 +24,33 @@ sanitize <- function(.x) {
   mutate(t=as.numeric(t) ) %>% 
     filter(t<=480)}
 
-resdir <- "Results_montecarlo_mini"
+
+# Usage
+'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
+
+Usage:
+  Analyze_montecarlo.R [-o <res>] 
+
+Options:
+-o <res>              Path where the results are (default: Results_montecarlo)
+' -> doc
+
+library(docopt)
+opts <- docopt(doc, version = 'Montecarlo')
+
+res = ifelse(is.null(opts[["o"]]), "Results_montecarlo_mini", as.character(opts["o"]) )
 
 ### extract scenarios with no probability of termination
-filelist <- list.files(paste0(resdir,"/"),pattern=".gdx")
+filelist <- list.files(paste0(res,"/"),pattern=".gdx")
 filelist <- filelist[stringr::str_detect(filelist,"EXP")]
-files <- c(paste0(resdir,"/",filelist)) 
+files <- c(paste0(res,"/",filelist)) 
+
+cat("Loading the data...")
 
 TATM <- gdxtools::batch_extract("TATM", files=files)$TATM    
 
 sanitized_names <- TATM %>% filter(t==2) %>% 
-  extract_names(.,resdir) %>% select(-t,-value) %>% unique()
+  extract_names(.,res) %>% select(-t,-value) %>% unique()
 
 TATM <- TATM  %>%
   inner_join(sanitized_names) %>% sanitize()
@@ -54,6 +71,9 @@ tot_forcing <- FORC %>%
   group_by(t,gas,rcp,ecs,tcr,cool_rate,pulse_time,geo_end,term,experiment) %>% 
   summarise(value=sum(value)) %>% ungroup() 
 
+
+cat("Loading the IDs from Montecarlo id file...")
+
 id_montecarlo <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% 
   select(-X,-ID) %>% 
   as_tibble() %>% 
@@ -62,6 +82,8 @@ id_montecarlo <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>%
   mutate(theta=as.numeric(theta),rcp=str_remove(rcp,"RCP")) %>% 
   rename(pulse_time=pulse,cool_rate=cool,geo_end=term,geo_start=start,term=term_delta)
   
+cat("Calculating net present cost: part1...")
+
 damnpv_pre <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpulsemasked") %>% 
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemasked")) %>%
   full_join(background_srm %>% rename(srm=value) %>% filter(experiment=="srmpulsemasked")) %>% 
@@ -95,6 +117,7 @@ damnpv_pre <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpuls
             dirnpv = sum( dir / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
   ungroup() %>%  mutate(costnpv = masknpv + implnpv + dirnpv)
 
+cat("Calculating net present cost: part2...")
 
 damnpv_post_noterm <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpulsemasked") %>% 
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemasked")) %>%
@@ -128,6 +151,8 @@ damnpv_post_noterm <- tot_forcing %>% rename(forc=value) %>% filter(experiment==
             implnpv = sum( impl / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
             dirnpv = sum( dir / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
   ungroup() %>%  mutate(costnpv = masknpv + implnpv + dirnpv)
+
+cat("Calculating net present cost: part3...")
 
 damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpulsemaskedterm") %>% 
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemaskedterm")) %>%
@@ -163,6 +188,7 @@ damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="s
             damnpv = sum( dam / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
   ungroup() %>%  mutate(costnpv = masknpv + implnpv + dirnpv + damnpv)
 
+cat("Calculating net present cost: putting things together...")
 
 scc <- TATM %>%  rename(temp_srm = value) %>% 
                filter(experiment=="srm") %>% 
@@ -201,4 +227,6 @@ damnpv <- damnpv_pre %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,ter
   full_join(scc) %>% 
   mutate(npc_srm=costnpv/pulse_size)
 
-write.csv(damnpv,file=paste0(resdir,"/output_analysis.csv"))
+cat("Saving output...")
+
+write.csv(damnpv,file=paste0(res,"/output_analysis.csv"))
