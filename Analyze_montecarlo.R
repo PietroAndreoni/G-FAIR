@@ -29,16 +29,20 @@ sanitize <- function(.x) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-o <res>] 
+  Analyze_montecarlo.R [-o <res>] [-h <run_hpc>] 
 
 Options:
 -o <res>              Path where the results are (default: Results_montecarlo)
+-h <run_hpc>          T/F if running from Juno (T) or local (F) 
 ' -> doc
 
 library(docopt)
 opts <- docopt(doc, version = 'Montecarlo')
 
 res = ifelse(is.null(opts[["o"]]), "Results_montecarlo_mini", as.character(opts["o"]) )
+run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
+
+if(run_hpc==F) {igdx()} else {igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")}
 
 ### extract scenarios with no probability of termination
 filelist <- list.files(paste0(res,"/"),pattern=".gdx")
