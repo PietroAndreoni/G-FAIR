@@ -59,7 +59,7 @@ filelist <- list.files(paste0(res,"/"),pattern=".gdx")
 filelist <- filelist[stringr::str_detect(filelist,"EXP")]
 files <- c(paste0(res,"/",filelist)) 
 
-cat("Sanitizing the data...")
+cat("Sanitizing the data...\n")
 ### make sure to include only files with the full scenario matrix
 all_scenarios <- data.frame(filelist) %>% rename(gdx=filelist) %>% extract_names(.,res) 
 
@@ -82,7 +82,10 @@ sanitized_names <- inner_join(all_scenarios,check2) %>%
   bind_rows(inner_join(all_scenarios %>% filter(experiment=="pulse"),check2 %>% select(gas,rcp,ecs,tcr,pulse_time) ) %>%  unique()) %>% 
   bind_rows(inner_join(all_scenarios %>% filter(experiment=="base"),check2 %>% select(rcp,ecs,tcr) ) %>%  unique())
 
-cat("Loading the data...")
+cat("Careful!", nrow(anti_join(all_scenarios,sanitized_names)), "scenarios have been removed.\n")
+
+
+cat("Loading the data...\n")
 
 TATM <- gdxtools::batch_extract("TATM", files=files)$TATM %>%
   inner_join(sanitized_names) %>% sanitize()
@@ -114,7 +117,7 @@ id_montecarlo <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>%
   mutate(theta=as.numeric(theta),rcp=str_remove(rcp,"RCP")) %>% 
   rename(pulse_time=pulse,cool_rate=cool,geo_end=term,geo_start=start,term=term_delta)
   
-cat("Calculating net present cost: part1...")
+cat("Calculating net present cost: part1...\n")
 
 damnpv_pre <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpulsemasked") %>% 
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemasked")) %>%
@@ -149,7 +152,7 @@ damnpv_pre <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpuls
             dirnpv = sum( dir / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
   ungroup() %>%  mutate(costnpv = masknpv + implnpv + dirnpv)
 
-cat("Calculating net present cost: part2...")
+cat("Calculating net present cost: part2...\n")
 
 damnpv_post_noterm <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpulsemasked") %>% 
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemasked")) %>%
@@ -184,7 +187,7 @@ damnpv_post_noterm <- tot_forcing %>% rename(forc=value) %>% filter(experiment==
             dirnpv = sum( dir / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
   ungroup() %>%  mutate(costnpv = masknpv + implnpv + dirnpv)
 
-cat("Calculating net present cost: part3...")
+cat("Calculating net present cost: part3...\n")
 
 damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpulsemaskedterm") %>% 
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemaskedterm")) %>%
@@ -220,7 +223,7 @@ damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="s
             damnpv = sum( dam / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
   ungroup() %>%  mutate(costnpv = masknpv + implnpv + dirnpv + damnpv)
 
-cat("Calculating net present cost: putting things together...")
+cat("Calculating net present cost: putting things together...\n")
 
 pulse_size <- W_EMI %>% 
   filter(ghg==gas) %>% 
@@ -259,6 +262,6 @@ damnpv <- damnpv_pre %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,ter
   full_join(scc) %>% 
   mutate(npc_srm=costnpv/pulse_size)
 
-cat("Saving output...")
+cat("Saving output...\n")
 
 write.csv(damnpv,file=paste0(res,"/output_analysis.csv"))
