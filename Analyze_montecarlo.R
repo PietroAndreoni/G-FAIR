@@ -54,19 +54,37 @@ forctoUSD <- forctoTg * TgtoUSD # US$/(W/m^2)
 gwpmax <- gwp* (1 + 0.022)^(180-1)
 
 
-### extract scenarios with no probability of termination
+### extract scenarios 
 filelist <- list.files(paste0(res,"/"),pattern=".gdx")
 filelist <- filelist[stringr::str_detect(filelist,"EXP")]
 files <- c(paste0(res,"/",filelist)) 
 
+cat("Sanitizing the data...")
+### make sure to include only files with the full scenario matrix
+all_scenarios <- data.frame(filelist) %>% rename(gdx=filelist) %>% extract_names(.,res) 
+
+# check that: (1) srm, srmpulse, srmpulsemasked, srmpulsemaskedterm are equal in number
+check1 <- all_scenarios %>% 
+  filter(!experiment %in% c("base","pulse") ) %>% 
+  group_by(gas,rcp,cool_rate,pulse_time,geo_end,geo_start,ecs,tcr) %>% 
+  summarise(tot=n(), diff=any(duplicated(experiment))) %>%
+  ungroup() %>% 
+  filter(tot==4 & diff==F)
+
+# check that each of the srm experiments has the pulse and the base experiments associated
+check2 <-  check1 %>% 
+  select(-tot,-diff) %>% 
+  inner_join( all_scenarios %>% filter(experiment=="pulse") %>% select(gas,rcp,ecs,tcr,pulse_time)) %>% 
+  inner_join( all_scenarios %>% filter(experiment=="base") %>% select(rcp,ecs,tcr))
+  
+# include only relevant scenarios
+sanitized_names <- inner_join(all_scenarios,check2) %>% 
+  bind_rows(inner_join(all_scenarios %>% filter(experiment=="pulse"),check2 %>% select(gas,rcp,ecs,tcr,pulse_time) ) %>%  unique()) %>% 
+  bind_rows(inner_join(all_scenarios %>% filter(experiment=="base"),check2 %>% select(rcp,ecs,tcr) ) %>%  unique())
+
 cat("Loading the data...")
 
-TATM <- gdxtools::batch_extract("TATM", files=files)$TATM    
-
-sanitized_names <- TATM %>% filter(t==2) %>% 
-  extract_names(.,res) %>% select(-t,-value) %>% unique()
-
-TATM <- TATM  %>%
+TATM <- gdxtools::batch_extract("TATM", files=files)$TATM %>%
   inner_join(sanitized_names) %>% sanitize()
   
 W_EMI <- gdxtools::batch_extract("W_EMI", files=files)$W_EMI %>%
