@@ -44,6 +44,16 @@ run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
 
 if(run_hpc==F) {igdx()} else {igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")}
 
+
+## climate damage function parameters
+gwp <- 105*1e12 # initial world gdp
+cost <- 0.001 # 0.1% GDP per W/m2 as Belaiia et al
+forctoTg <- 1/0.2 # from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5897825/ 
+TgtoUSD <- 2250*10^6 # from https://iopscience.iop.org/article/10.1088/1748-9326/aba7e7/pdf  
+forctoUSD <- forctoTg * TgtoUSD # US$/(W/m^2)
+gwpmax <- gwp* (1 + 0.022)^(180-1)
+
+
 ### extract scenarios with no probability of termination
 filelist <- list.files(paste0(res,"/"),pattern=".gdx")
 filelist <- filelist[stringr::str_detect(filelist,"EXP")]
@@ -194,9 +204,19 @@ damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="s
 
 cat("Calculating net present cost: putting things together...")
 
+pulse_size <- W_EMI %>% 
+  filter(ghg==gas) %>% 
+  filter(experiment %in% c("srm","srmpulse") ) %>% 
+  group_by(ghg,t,rcp,ecs,tcr,gas,cool_rate,pulse_time,geo_end) %>% 
+  mutate(pulse_size=value-value[experiment=="srm"]) %>% 
+  filter(experiment=="srmpulse" & pulse_size!=0) %>% 
+  ungroup() %>% 
+  select(-experiment,-ghg,-t,-value,-gdx,-file,-path,-term) %>% 
+  mutate(pulse_size=ifelse(gas=="co2",pulse_size*1e9,pulse_size*1e6))
+
 scc <- TATM %>%  rename(temp_srm = value) %>% 
-               filter(experiment=="srm") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srm) %>%
+  filter(experiment=="srm") %>% 
+  select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srm) %>%
   inner_join(TATM %>%  rename(temp_srmpulse = value) %>% 
                filter(experiment=="srmpulse") %>% 
                select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srmpulse)) %>%
@@ -211,16 +231,6 @@ scc <- TATM %>%  rename(temp_srm = value) %>%
   full_join(pulse_size) %>% 
   mutate(scc=damnpv/pulse_size ) %>% 
   select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,delta,alpha,scc)
-
-pulse_size <- W_EMI %>% 
-  filter(ghg==gas) %>% 
-  filter(experiment %in% c("srm","srmpulse") ) %>% 
-  group_by(ghg,t,rcp,ecs,tcr,gas,cool_rate,pulse_time,geo_end) %>% 
-  mutate(pulse_size=value-value[experiment=="srm"]) %>% 
-  filter(experiment=="srmpulse" & pulse_size!=0) %>% 
-  ungroup() %>% 
-  select(-experiment,-ghg,-t,-value,-gdx,-file,-path,-term) %>% 
-  mutate(pulse_size=ifelse(gas=="co2",pulse_size*1e9,pulse_size*1e6))
 
 damnpv <- damnpv_pre %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpre=costnpv) %>% 
   full_join(damnpv_post_noterm %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostnoterm=costnpv)) %>% 
