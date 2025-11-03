@@ -49,7 +49,7 @@ run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
 # numeric
 n_scenarios = ifelse(is.null(opts[["n"]]), 1000, as.numeric(opts["n"]) )
 start_job = ifelse(is.null(opts[["s"]]), 1, as.numeric(opts["s"]) )
-end_job = ifelse(is.null(opts[["e"]]), 1000, as.numeric(opts["e"]) )
+end_job = ifelse(is.null(opts[["e"]]), 100000, as.numeric(opts["e"]) )
 
 # strings
 res = ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts["o"]) )
@@ -169,17 +169,17 @@ gams <- paste0("gams FAIR.gms --experiment=srm",
               " --results_folder=",res)
 
 results_name <-  paste0(data_srmpulse[i,]$rcp,
-                        "_EXPsrmpulsemasked_",
+                        "_EXPsrmpulsemaskedterm_TER",data_srmpulse[i,]$term_delta,
                         "_GAS",gas,
-                        "ECS_",data_srmpulse[i,]$ecs,
+                        "_ECS",data_srmpulse[i,]$ecs,
                         "_TCR",data_srmpulse[i,]$tcr,
                         "_PT",data_srmpulse[i,]$pulse,
                         "_RC",data_srmpulse[i,]$cool,
-                        "_EC",data_srmpulse[i,]$term,
+                        "_EC",data_srmpulse[i,]$term+100,
                         "_BC",data_srmpulse[i,]$start,
                         "_IChistorical_run")
 
-if (!any(str_detect(filelist,results_name)) ) {
+if (!any(str_detect(str_remove(filelist,".gdx"),results_name)) ) {
   if (run_parallel==T) {bsub <- str_remove(bsub, "-K ")}
   command <- paste(bsub, gams)
   write(str_remove(command, "-K "), file = sh_file, append = TRUE)
