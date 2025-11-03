@@ -141,12 +141,7 @@ data <- as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"))) %>% select(-X)
  
 # select unique scenarios 
 data_srmpulse <- data %>% 
-  select(ecs, tcr, rcp, pulse, cool, term, start, term_delta) %>% unique() %>% 
-  mutate()
-
-data_pulse <- data %>% 
-  select(ecs, tcr, rcp, pulse) %>% 
-  unique() 
+  select(ecs, tcr, rcp, pulse, cool, term, start, term_delta) %>% unique() 
 
 cat("Launching jobs...")
 
@@ -193,35 +188,6 @@ if (!any(str_detect(filelist,results_name)) ) {
 
 }
 
-for (i in seq(start_job,min(end_job,nrow(data_pulse))) ) {
-  bsub <- paste("bsub", "-q p_short", "-n 1",
-                "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-M -K 64G")
-  
-  gams <- paste0("gams FAIR.gms --experiment=pulse",
-                 " --gas=",gas,
-                 " --ecs=",data_pulse[i,]$ecs,
-                 " --tcr=",data_pulse[i,]$tcr,
-                 " --rcp=",data_pulse[i,]$rcp,
-                 " --pulse_time=",data_pulse[i,]$pulse,
-                 " --results_folder=",res)
-  
-  results_name <-  paste0(data_srmpulse[i,]$rcp,
-                          "_GAS",gas,
-                          "_EXPpulse",
-                          "_ECS_",data_srmpulse[i,]$ecs,
-                          "_TCR",data_srmpulse[i,]$tcr,
-                          "_PT",data_srmpulse[i,]$pulse,
-                          "_IChistorical_run")
-  
-  if (!any(str_detect(filelist,results_name)) ) {
-    if (run_parallel==T) {bsub <- str_remove(bsub, "-K ")}
-    command <- paste(bsub, gams)
-    write(str_remove(command, "-K "), file = sh_file, append = TRUE)
-    if (run_hpc==F) {command <- gams}
-    if (run_scenarios==T) {ret <- system(command = command, intern = TRUE)}
-    }
-  
 }
   
-}
 
