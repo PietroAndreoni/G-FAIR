@@ -61,7 +61,10 @@ files <- c(paste0(res,"/",filelist))
 
 cat("Sanitizing the data...\n")
 ### make sure to include only files with the full scenario matrix
-all_scenarios <- data.frame(filelist) %>% rename(gdx=filelist) %>% extract_names(.,res) 
+all_scenarios <- data.frame(filelist) %>% 
+  mutate(gdx=paste0(res,"/",filelist)) %>% 
+  select(-filelist) %>% 
+  extract_names(.,res) 
 
 # check that: (1) srm, srmpulse, srmpulsemasked, srmpulsemaskedterm are equal in number
 check1 <- all_scenarios %>% 
@@ -81,6 +84,8 @@ check2 <-  check1 %>%
 sanitized_names <- inner_join(all_scenarios,check2) %>% 
   bind_rows(inner_join(all_scenarios %>% filter(experiment=="pulse"),check2 %>% select(gas,rcp,ecs,tcr,pulse_time) ) %>%  unique()) %>% 
   bind_rows(inner_join(all_scenarios %>% filter(experiment=="base"),check2 %>% select(rcp,ecs,tcr) ) %>%  unique())
+
+files <- sanitized_names$gdx 
 
 cat("Careful!", nrow(anti_join(all_scenarios,sanitized_names)), "scenarios have been removed.\n")
 
@@ -253,15 +258,12 @@ scc <- TATM %>%  rename(temp_srm = value) %>%
   mutate(scc=damnpv/pulse_size ) %>% 
   select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,delta,alpha,scc)
 
-damnpv <- damnpv_pre %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpre=costnpv) %>% 
-  full_join(damnpv_post_noterm %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostnoterm=costnpv)) %>% 
-  full_join(damnpv_post_term %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostterm=costnpv)) %>% 
-  mutate(costnpv=costpre+as.numeric(prob)*costpostterm+(1-as.numeric(prob))*costpostnoterm) %>% 
-  select(-costpre,-costpostterm,-costpostnoterm) %>% 
-  full_join(pulse_size) %>% 
-  full_join(scc) %>% 
-  mutate(npc_srm=costnpv/pulse_size)
 
+ggplot(damnpv) +
+  geom_density(aes(x=npc_srm,color=gas)) + coord_cartesian(xlim=c(-2,2)) +
+  facet_wrap()
 cat("Saving output...\n")
+
+damnpv %>% group_by(gas) %>% summarise(med=median(npc_srm,na.rm=TRUE),sd=sd(npc_srm,na.rm=TRUE) )
 
 write.csv(damnpv,file=paste0(res,"/output_analysis.csv"))
