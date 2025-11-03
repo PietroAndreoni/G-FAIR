@@ -1,26 +1,19 @@
 *.gdx
-!input/*.gdx
 *.lst
 *.lxi
 *.log
 *.log~1
 *.log~2
 *.log~3
-225a/
-.Rproj.user
+*.Rproj.user
 *.png
 *.RData
 *.Rhistory
 *.Rproj
-
 *.docx
-
-Paper and figures/
-
-225*/
-
-id_montecarlo.csv
-
 *.swp
 
-Montecarlo.sh
+Paper and figures/
+Results*/
+225*/
+!input/*.gdx

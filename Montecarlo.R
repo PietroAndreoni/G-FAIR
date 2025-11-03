@@ -69,7 +69,7 @@ if (!file.exists(sh_file)) {
   file.remove(sh_file)
   file.create(sh_file)}
 
-cat("Generating data...")
+cat("Generating data... \n")
 
 if (generate_data==F & !file.exists(paste0(res,"/id_montecarlo.csv"))) stop("Please generate new data if no pre-existing are available")
 
@@ -144,7 +144,7 @@ data <- as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"))) %>% select(-X)
 data_srmpulse <- data %>% 
   select(ecs, tcr, rcp, pulse, cool, term, start, term_delta) %>% unique() 
 
-cat("Launching jobs...")
+cat("Launching jobs... \n")
 
 filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 

@@ -29,18 +29,20 @@ sanitize <- function(.x) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-o <res>] [-h <run_hpc>] 
+  Analyze_montecarlo.R [-o <res>] [-h <run_hpc>] [-p <plot_results>] 
 
 Options:
 -o <res>              Path where the results are (default: Results_montecarlo)
 -h <run_hpc>          T/F if running from Juno (T) or local (F) 
+-p <plot_results>     T/F to plot data and save data analysis
 ' -> doc
 
 library(docopt)
 opts <- docopt(doc, version = 'Montecarlo')
 
-res = ifelse(is.null(opts[["o"]]), "Results_montecarlo_mini", as.character(opts["o"]) )
+res = ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts["o"]) )
 run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
+plot_results = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
 
 if(run_hpc==F) {igdx()} else {igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")}
 
@@ -258,12 +260,62 @@ scc <- TATM %>%  rename(temp_srm = value) %>%
   mutate(scc=damnpv/pulse_size ) %>% 
   select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,delta,alpha,scc)
 
+damnpv <- damnpv_pre %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpre=costnpv) %>% 
+  full_join(damnpv_post_noterm %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostnoterm=costnpv)) %>% 
+  full_join(damnpv_post_term %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostterm=costnpv)) %>% 
+  mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+  mutate(costnpv=costpre+as.numeric(prob)*costpostterm+(1-as.numeric(prob))*costpostnoterm) %>% 
+  select(-costpre,-costpostterm,-costpostnoterm) %>% 
+  full_join(pulse_size) %>% 
+  full_join(scc) %>% 
+  mutate(npc_srm=costnpv/pulse_size)
 
-ggplot(damnpv) +
-  geom_density(aes(x=npc_srm,color=gas)) + coord_cartesian(xlim=c(-2,2)) +
-  facet_wrap()
 cat("Saving output...\n")
 
-damnpv %>% group_by(gas) %>% summarise(med=median(npc_srm,na.rm=TRUE),sd=sd(npc_srm,na.rm=TRUE) )
-
 write.csv(damnpv,file=paste0(res,"/output_analysis.csv"))
+
+### produce plots (optional)
+if(plot_results==T) {
+damnpv %>% 
+  group_by(gas) %>% 
+  summarise(med=median(npc_srm,na.rm=TRUE),sd=sd(npc_srm,na.rm=TRUE) )
+
+damnorm <- damnpv %>% group_by(gas) %>% mutate(npc_norm=npc_srm/median(npc_srm,na.rm=TRUE))
+
+ggplot(damnorm %>% filter(gas=="co2")) +
+  geom_boxplot(aes(x=npc_norm,color=gas),outlier.shape = NA) +
+  facet_wrap(gas~.,scales="free") +
+  coord_cartesian(xlim = quantile(damnorm$npc_norm, c(0.03, 0.97), na.rm=TRUE))
+
+library(gsaot)
+gsoat_data <- damnpv %>% filter(gas=="ch4") %>% ungroup()
+stat_analysis_ch4 <- ot_indices_1d(gsoat_data %>% 
+                                     select(rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, delta, prob, alpha, theta, term),
+                                   gsoat_data %>% pull(npc_srm ), 
+                                   M= 15, 
+                                   boot = T, 
+                                   R = 100)
+lowerbound_ch4 <- lower_bound(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
+
+gsoat_data <- damnpv %>% filter(gas=="co2") %>% ungroup()
+stat_analysis_co2 <- ot_indices_1d(gsoat_data %>% 
+                                     select(rcp, ecs, tcr, cool_rate, pulse_time, geo_end, geo_start, delta, prob, alpha, theta, term),
+                                   gsoat_data %>% pull(npc_srm), 
+                                   M= 15, 
+                                   boot = T, 
+                                   R = 100)
+lowerbound_co2 <- lower_bound(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
+
+ggplot(as_tibble(stat_analysis_ch4$indices_ci)) + 
+  geom_bar(aes(x=input,
+               y=original,
+               fill=input),stat="identity",color="black") + 
+  geom_hline(yintercept=lowerbound_ch4$indices) +
+  ylab("importance [ch4]") + xlab("")
+
+ggplot(as_tibble(stat_analysis_co2$indices_ci)) + 
+  geom_bar(aes(x=input,
+               y=original,
+               fill=input),stat="identity",color="black") +
+  geom_hline(yintercept=lowerbound$indices) +
+  ylab("importance [co2]") + xlab("") }
