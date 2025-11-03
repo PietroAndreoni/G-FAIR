@@ -23,7 +23,7 @@ Options:
 ' -> doc
 
 library(docopt)
-arguments <- docopt(doc, version = 'Montecarlo')
+opts <- docopt(doc, version = 'Montecarlo')
 
 drawln <- function(median,std,plot=F) {
   location <- log(median)#log(m^2 / sqrt(s^2 + m^2))
@@ -41,10 +41,10 @@ drawln <- function(median,std,plot=F) {
 
 # logical
 generate_data = ifelse(is.null(opts[["g"]]), T, as.logical(opts["g"]) )
-overwrite_data = ifelse(is.null(opts[["o"]]), F, as.logical(opts["o"]) )
+overwrite_data = ifelse(is.null(opts[["w"]]), F, as.logical(opts["w"]) )
 run_scenarios = ifelse(is.null(opts[["r"]]), T, as.logical(opts["p"]) )
-run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["r"]) )
-run_hpc = ifelse(is.null(opts[["h"]]), F, as.logical(opts["h"]) )
+run_parallel = ifelse(is.null(opts[["p"]]), T, as.logical(opts["r"]) )
+run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
 
 # numeric
 n_scenarios = ifelse(is.null(opts[["n"]]), 1000, as.numeric(opts["n"]) )
@@ -58,23 +58,24 @@ res = ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts["o"])
 sh_file <- paste0(res,"/montecarlo.sh" ) 
 
 # Make sure the file exists (create it if not)
+if (!dir.exists(res)) {
+  dir.create(res)
+}
+
+# Make sure the file exists (create it if not)
 if (!file.exists(sh_file)) {
   file.create(sh_file)
 } else {
   file.remove(sh_file)
   file.create(sh_file)}
 
-# Make sure the file exists (create it if not)
-if (!dir.exists(res)) {
-  dir.create(res)
-}
-
-
 cat("Generating data...")
+
+if (generate_data==F & !file.exists(paste0(res,"/id_montecarlo.csv"))) stop("Please generate new data if no pre-existing are available")
 
 if (generate_data==T) {
 
-if (overwrite_data==T) {data <- data.frame()} else {data <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% select(-X)}
+if (overwrite_data==T | !file.exists(paste0(res,"/id_montecarlo.csv"))) {data <- data.frame()} else {data <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% select(-X)}
 
 max_id <- nrow(data)
 
