@@ -77,7 +77,12 @@ if (generate_data==F & !file.exists(paste0(res,"/id_montecarlo.csv"))) stop("Ple
 
 if (generate_data==T) {
 
-if (overwrite_data==T | !file.exists(paste0(res,"/id_montecarlo.csv"))) {data <- data.frame()} else {data <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% select(-X)}
+if (overwrite_data==T | !file.exists(paste0(res,"/id_montecarlo.csv"))) {
+  data <- data.frame()
+} else {
+  data <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% select(-X)
+  write.csv(data,file=paste0(res,"/id_montecarlo_copy.csv")) # story a copy of previous version database
+  }
 
 max_id <- nrow(data)
 
@@ -180,6 +185,8 @@ results_name <-  paste0(data_srmpulse[i,]$rcp,
                         "_EC",data_srmpulse[i,]$term,
                         "_BC",data_srmpulse[i,]$start,
                         "_IChistorical_run")
+
+if (run_parallel==T) {cat("Launching scenario",i,"with gas",gas,"...\n")} else {cat("Solving scenario",i,"with gas",gas,"...\n")}
 
 if (!any(str_detect(str_remove(filelist,".gdx"),results_name)) ) {
   if (run_parallel==T) {bsub <- str_remove(bsub, "-K ")}

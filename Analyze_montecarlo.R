@@ -71,7 +71,7 @@ all_scenarios <- data.frame(filelist) %>%
 # check that: (1) srm, srmpulse, srmpulsemasked, srmpulsemaskedterm are equal in number
 check1 <- all_scenarios %>% 
   filter(!experiment %in% c("base","pulse") ) %>% 
-  group_by(gas,rcp,cool_rate,pulse_time,geo_end,geo_start,ecs,tcr) %>% 
+  group_by(gas,rcp,cool_rate,pulse_time,geo_start,geo_end,ecs,tcr) %>% 
   summarise(tot=n(), diff=any(duplicated(experiment))) %>%
   ungroup() %>% 
   filter(tot==4 & diff==F)
@@ -109,7 +109,7 @@ background_srm <- gdxtools::batch_extract("forcing_srm", files=files)$forcing_sr
   inner_join(sanitized_names) %>% sanitize()
 
 tot_forcing <- FORC %>% 
-  group_by(t,gas,rcp,ecs,tcr,cool_rate,pulse_time,geo_end,term,experiment) %>% 
+  group_by(t,gas,rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,term,experiment) %>% 
   summarise(value=sum(value)) %>% ungroup() 
 
 
@@ -135,10 +135,10 @@ damnpv_pre <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpuls
                select(t,rcp,ecs,tcr,temp_ghg)) %>%
   inner_join(TATM %>%  rename(temp_srm = value) %>% 
                filter(experiment=="srm") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srm)) %>%
+               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srm)) %>%
   inner_join(TATM %>%  rename(temp_srmpulse = value) %>% 
                filter(experiment=="srmpulse") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srmpulse)) %>%
+               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srmpulse)) %>%
   inner_join(TATM %>%  rename(temp_ghgpulse = value) %>% 
                filter(experiment=="pulse") %>% 
                select(t,gas,rcp,ecs,tcr,pulse_time,temp_ghgpulse)) %>%
@@ -152,7 +152,7 @@ damnpv_pre <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpuls
          dir = gwp * srm_masking * cost,
          dam = gwp*( alpha * ((temp+deltatemp)**2-temp**2)),
          mask = 2 * gwp * alpha * temp_ghg *  (1-cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1+srm/forc) ) %>%
-  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,delta,alpha,theta,term,prob) %>%
+  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,gas,delta,alpha,theta,term,prob) %>%
   summarise(masknpv = sum( mask / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
             implnpv = sum( impl / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
             dirnpv = sum( dir / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
@@ -170,10 +170,10 @@ damnpv_post_noterm <- tot_forcing %>% rename(forc=value) %>% filter(experiment==
                select(t,rcp,ecs,tcr,temp_ghg)) %>%
   inner_join(TATM %>%  rename(temp_srm = value) %>% 
                filter(experiment=="srm") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srm)) %>%
+               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srm)) %>%
   inner_join(TATM %>%  rename(temp_srmpulse = value) %>% 
                filter(experiment=="srmpulse") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srmpulse)) %>%
+               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srmpulse)) %>%
   inner_join(TATM %>%  rename(temp_ghgpulse = value) %>% 
                filter(experiment=="pulse") %>% 
                select(t,gas,rcp,ecs,tcr,pulse_time,temp_ghgpulse)) %>%
@@ -187,7 +187,7 @@ damnpv_post_noterm <- tot_forcing %>% rename(forc=value) %>% filter(experiment==
          dir = gwp * srm_masking * cost,
          dam = gwp*( alpha * ((temp+deltatemp)**2-temp**2)),
          mask = 2 * gwp * alpha * temp_ghg *  (1-cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1+srm/forc) ) %>%
-  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,delta,alpha,theta,term,prob) %>%
+  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,gas,delta,alpha,theta,term,prob) %>%
   summarise(masknpv = sum( mask / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
             implnpv = sum( impl / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
             dirnpv = sum( dir / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE)) %>% 
@@ -205,10 +205,10 @@ damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="s
                select(t,rcp,ecs,tcr,temp_ghg)) %>%
   inner_join(TATM %>%  rename(temp_srm = value) %>% 
                filter(experiment=="srm") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srm)) %>%
+               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srm)) %>%
   inner_join(TATM %>%  rename(temp_srmpulse = value) %>% 
                filter(experiment=="srmpulse") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srmpulse)) %>%
+               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srmpulse)) %>%
   inner_join(TATM %>%  rename(temp_ghgpulse = value) %>% 
                filter(experiment=="pulse") %>% 
                select(t,gas,rcp,ecs,tcr,pulse_time,temp_ghgpulse)) %>%
@@ -222,7 +222,7 @@ damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="s
          dir = gwp*srm_masking*cost,
          dam = gwp*(alpha * (temp**2-temp_srm**2)),
          mask = 2 * gwp * alpha * temp_ghg *  (1-cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10/3.71 * (1+srm/forc)) %>% 
-  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob) %>%
+  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,gas,term,delta,alpha,theta,prob) %>%
   summarise(masknpv = sum( mask / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
             implnpv = sum( impl / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
             dirnpv = sum( dir / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE),
@@ -234,7 +234,7 @@ cat("Calculating net present cost: putting things together...\n")
 pulse_size <- W_EMI %>% 
   filter(ghg==gas) %>% 
   filter(experiment %in% c("srm","srmpulse") ) %>% 
-  group_by(ghg,t,rcp,ecs,tcr,gas,cool_rate,pulse_time,geo_end) %>% 
+  group_by(ghg,t,rcp,ecs,tcr,gas,cool_rate,pulse_time,geo_start,geo_end) %>% 
   mutate(pulse_size=value-value[experiment=="srm"]) %>% 
   filter(experiment=="srmpulse" & pulse_size!=0) %>% 
   ungroup() %>% 
@@ -243,25 +243,25 @@ pulse_size <- W_EMI %>%
 
 scc <- TATM %>%  rename(temp_srm = value) %>% 
   filter(experiment=="srm") %>% 
-  select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srm) %>%
+  select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srm) %>%
   inner_join(TATM %>%  rename(temp_srmpulse = value) %>% 
                filter(experiment=="srmpulse") %>% 
-               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_end,temp_srmpulse)) %>%
+               select(t,gas,rcp,ecs,tcr,pulse_time,cool_rate,geo_start,geo_end,temp_srmpulse)) %>%
   mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>% 
   inner_join(id_montecarlo %>% select(-term,-prob,-theta)) %>% 
   ungroup() %>% 
   filter(t>=as.numeric(pulse_time)) %>% 
   rowwise() %>% mutate(gwpt = min(gwpmax,gwp* (1 + 0.022)^(t-1)) ) %>%
   mutate(dam = gwp*( alpha * ((temp_srmpulse)**2-temp_srm**2)) ) %>% 
-  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,delta,alpha) %>%
+  group_by(rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,gas,delta,alpha) %>%
   summarise(damnpv = sum( dam / (1+delta)^(t-as.numeric(pulse_time)), na.rm = TRUE) ) %>%
   full_join(pulse_size) %>% 
   mutate(scc=damnpv/pulse_size ) %>% 
-  select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,delta,alpha,scc)
+  select(rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,gas,delta,alpha,scc)
 
-damnpv <- damnpv_pre %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpre=costnpv) %>% 
-  full_join(damnpv_post_noterm %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostnoterm=costnpv)) %>% 
-  full_join(damnpv_post_term %>% select(rcp,ecs,tcr,cool_rate,pulse_time,geo_end,gas,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostterm=costnpv)) %>% 
+damnpv <- damnpv_pre %>% select(gas,rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpre=costnpv) %>% 
+  full_join(damnpv_post_noterm %>% select(gas,rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostnoterm=costnpv)) %>% 
+  full_join(damnpv_post_term %>% select(gas,rcp,ecs,tcr,cool_rate,pulse_time,geo_start,geo_end,term,delta,alpha,theta,prob,costnpv) %>%  rename(costpostterm=costnpv)) %>% 
   mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
   mutate(costnpv=costpre+as.numeric(prob)*costpostterm+(1-as.numeric(prob))*costpostnoterm) %>% 
   select(-costpre,-costpostterm,-costpostnoterm) %>% 
@@ -298,7 +298,7 @@ lowerbound_ch4 <- lower_bound(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
 
 gsoat_data <- damnpv %>% filter(gas=="co2") %>% ungroup()
 stat_analysis_co2 <- ot_indices_1d(gsoat_data %>% 
-                                     select(rcp, ecs, tcr, cool_rate, pulse_time, geo_end, geo_start, delta, prob, alpha, theta, term),
+                                     select(rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, delta, prob, alpha, theta, term),
                                    gsoat_data %>% pull(npc_srm), 
                                    M= 15, 
                                    boot = T, 
