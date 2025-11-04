@@ -77,8 +77,7 @@ check1 <- all_scenarios %>%
   filter(tot==4 & diff==F)
 
 # check that each of the srm experiments has the pulse and the base experiments associated
-check2 <-  check1 %>% 
-  select(-tot,-diff) %>% 
+check2 <-  inner_join(all_scenarios %>% select(-term),check1 %>% select(-tot,-diff)) %>% 
   inner_join( all_scenarios %>% filter(experiment=="pulse") %>% select(gas,rcp,ecs,tcr,pulse_time)) %>% 
   inner_join( all_scenarios %>% filter(experiment=="base") %>% select(rcp,ecs,tcr))
   
@@ -89,7 +88,7 @@ sanitized_names <- inner_join(all_scenarios,check2) %>%
 
 files <- sanitized_names$gdx 
 
-cat("Careful!", nrow(anti_join(all_scenarios,sanitized_names)), "scenarios have been removed.\n")
+cat("Careful!", nrow(anti_join(all_scenarios,sanitized_names)), "scenarios out of",nrow(all_scenarios) ,"have been removed.\n")
 
 
 cat("Loading the data...\n")
@@ -119,7 +118,7 @@ cat("Loading the IDs from Montecarlo id file...")
 id_montecarlo <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% 
   select(-X,-ID) %>% 
   as_tibble() %>% 
-  mutate(term=as.integer(term+100) ) %>% 
+  mutate(term=as.integer(term) ) %>% 
   mutate_if(is.integer, as.character) %>% 
   mutate(theta=as.numeric(theta),rcp=str_remove(rcp,"RCP")) %>% 
   rename(pulse_time=pulse,cool_rate=cool,geo_end=term,geo_start=start,term=term_delta)
