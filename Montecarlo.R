@@ -8,7 +8,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Montecarlo.R [-g <generate_data>] [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
+  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
 
 Options:
 -o <res>              Path where the results are (default: Results)
@@ -20,6 +20,7 @@ Options:
 -h <run_hpc>          T/F if to run on Juno or local (windows)
 -s <start_job>        Number of line to start calling the scenarios 
 -e <end_job>          End of line to start calling the scenarios
+-q <which_queue>       Select queue to send the jobs to (for parallel solving)
 ' -> doc
 
 library(docopt)
@@ -53,6 +54,7 @@ end_job = ifelse(is.null(opts[["e"]]), 100000, as.numeric(opts["e"]) )
 
 # strings
 res = ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts["o"]) )
+which_queue = ifelse(is.null(opts[["q"]]), "p_short", as.character(opts["q"]) )
 
 # Define the path to the .ssh file
 sh_file <- paste0(res,"/montecarlo.sh" ) 
@@ -151,7 +153,7 @@ filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 for (gas in c("ch4","co2")) {
   
 for (i in seq(start_job,min(end_job,nrow(data_srmpulse))) ) {
-bsub <- paste("bsub", "-q p_short", "-n 1",
+bsub <- paste("bsub", "-q",which_queue, "-n 1",
               "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
 
 gams <- paste0("gams FAIR.gms --experiment=srm",
