@@ -8,7 +8,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
+  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
 
 Options:
 -o <res>              Path where the results are (default: Results)
@@ -20,7 +20,8 @@ Options:
 -h <run_hpc>          T/F if to run on Juno or local (windows)
 -s <start_job>        Number of line to start calling the scenarios 
 -e <end_job>          End of line to start calling the scenarios
--q <which_queue>       Select queue to send the jobs to (for parallel solving)
+-q <which_queue>      Select queue to send the jobs to (for parallel solving)
+-m <max_scenarios>    Maximum scenarios to send to solve
 ' -> doc
 
 library(docopt)
@@ -48,7 +49,8 @@ run_parallel = ifelse(is.null(opts[["p"]]), T, as.logical(opts["r"]) )
 run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
 
 # numeric
-n_scenarios = ifelse(is.null(opts[["n"]]), 1000, as.numeric(opts["n"]) )
+n_scenarios = ifelse(is.null(opts[["n"]]), 10, as.numeric(opts["n"]) )
+max_scenarios = ifelse(is.null(opts[["m"]]), 100, as.numeric(opts["m"]) )
 start_job = ifelse(is.null(opts[["s"]]), 1, as.numeric(opts["s"]) )
 end_job = ifelse(is.null(opts[["e"]]), 100000, as.numeric(opts["e"]) )
 
@@ -58,6 +60,7 @@ which_queue = ifelse(is.null(opts[["q"]]), "p_short", as.character(opts["q"]) )
 
 # Define the path to the .ssh file
 sh_file <- paste0(res,"/montecarlo.sh" ) 
+scenarios_launched <- 0
 
 # Make sure the file exists (create it if not)
 if (!dir.exists(res)) {
@@ -189,13 +192,16 @@ results_name <-  paste0(data_srmpulse[i,]$rcp,
 if (run_parallel==T) {cat("Launching scenario",i,"with gas",gas,"...\n")} else {cat("Solving scenario",i,"with gas",gas,"...\n")}
 
 if (!any(str_detect(str_remove(filelist,".gdx"),results_name)) ) {
-  if (run_parallel==T) {bsub <- str_remove(bsub, "-K ")}
+  if (run_parallel==T) { 
+    bsub <- str_remove(bsub, "-K ") 
+    scenarios_launched <- scenarios_launched + 1 }
   command <- paste(bsub, gams)
   write(str_remove(command, "-K "), file = sh_file, append = TRUE)
   if (run_hpc==F) {command <- gams}
   if (run_scenarios==T) {ret <- system(command = command, intern = TRUE)}
   }
 
+if(run_parallel==T & scenarios_launched >= max_scenarios) stop("The maximum number of scenarios (",max_scenarios,") has been launched for this batch")
 }
 
 }
