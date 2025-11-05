@@ -2,11 +2,10 @@ library(gdxtools)
 library(dplyr)
 library(stringr)
 
-extract_names <- function(.x,res) {
+extract_names <- function(.x) {
   .x %>% 
     as_tibble() %>% 
-    mutate(file=str_remove_all(gdx,paste0(res,"/|.gdx")),
-           path=res,
+    mutate(file=str_remove_all(gdx,".*(?=RCP)|.gdx"),
            gas=str_extract(file,"(?<=GAS).+?(?=_)"),
            rcp=str_extract(file,"(?<=RCP).+?(?=_)"),
            cool_rate=str_extract(str_remove(file,"RCP"),"(?<=RC).+?(?=_)"),
@@ -29,10 +28,11 @@ sanitize <- function(.x) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-o <res>] [-h <run_hpc>] [-p <plot_results>] 
+  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [-h <run_hpc>] [-p <plot_results>] 
 
 Options:
--o <res>              Path where the results are (default: Results_montecarlo)
+-i <res>              Path where the results are (default: Results_montecarlo). For multiple folders separate with -
+-o <output_folder>   Where to save results
 -h <run_hpc>          T/F if running from Juno (T) or local (F) 
 -p <plot_results>     T/F to plot data and save data analysis
 ' -> doc
@@ -40,12 +40,22 @@ Options:
 library(docopt)
 opts <- docopt(doc, version = 'Montecarlo')
 
-res = ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts["o"]) )
+res = ifelse(is.null(opts[["i"]]), "Results_montecarlo", as.character(opts["i"]) )
+res <- str_split(res,"-")[[1]]
+
+output_folder = ifelse(is.null(opts[["o"]]), "Results_output", as.character(opts["o"]) )
+
+# Make sure the output folder exists (create it if not)
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder)
+}
+
+if (any(!dir.exists(res)) ) stop("some of the folder specified do not exsist")
+  
 run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
 plot_results = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
 
 if(run_hpc==F) {igdx()} else {igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")}
-
 
 ## climate damage function parameters
 gwp <- 105*1e12 # initial world gdp
@@ -57,16 +67,18 @@ gwpmax <- gwp* (1 + 0.022)^(180-1)
 
 
 ### extract scenarios 
-filelist <- list.files(paste0(res,"/"),pattern=".gdx")
+filelist <- unlist(lapply(res, function(folder) {
+  files <- list.files(paste0(folder, "/"), pattern = ".gdx", full.names = TRUE)
+  return(files)}))
+
 filelist <- filelist[stringr::str_detect(filelist,"EXP")]
 files <- c(paste0(res,"/",filelist)) 
 
 cat("Sanitizing the data...\n")
 ### make sure to include only files with the full scenario matrix
 all_scenarios <- data.frame(filelist) %>% 
-  mutate(gdx=paste0(res,"/",filelist)) %>% 
-  select(-filelist) %>% 
-  extract_names(.,res) 
+  rename(gdx=filelist) %>% 
+  extract_names(.) 
 
 # check that: (1) srm, srmpulse, srmpulsemasked, srmpulsemaskedterm are equal in number
 check1 <- all_scenarios %>% 
@@ -115,7 +127,13 @@ tot_forcing <- FORC %>%
 
 cat("Loading the IDs from Montecarlo id file...")
 
-id_montecarlo <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% 
+id_montecarlo <- do.call(rbind, lapply(res, function(folder) {
+    data <- read.csv(paste0(folder, "/id_montecarlo.csv"))
+#    data$folder <- folder  # add folder info as a new column (optional but useful)
+    return(data)
+  }))
+
+id_montecarlo <- id_montecarlo %>% 
   select(-X,-ID) %>% 
   as_tibble() %>% 
   mutate(term=as.integer(term) ) %>% 
@@ -238,7 +256,7 @@ pulse_size <- W_EMI %>%
   mutate(pulse_size=value-value[experiment=="srm"]) %>% 
   filter(experiment=="srmpulse" & pulse_size!=0) %>% 
   ungroup() %>% 
-  select(-experiment,-ghg,-t,-value,-gdx,-file,-path,-term) %>% 
+  select(-experiment,-ghg,-t,-value,-gdx,-file,-term) %>% 
   mutate(pulse_size=ifelse(gas=="co2",pulse_size*1e9,pulse_size*1e6))
 
 scc <- TATM %>%  rename(temp_srm = value) %>% 
@@ -271,7 +289,7 @@ damnpv <- damnpv_pre %>% select(gas,rcp,ecs,tcr,cool_rate,pulse_time,geo_start,g
 
 cat("Saving output...\n")
 
-write.csv(damnpv,file=paste0(res,"/output_analysis.csv"))
+write.csv(damnpv,file=paste0(output_folder,"/output_analysis.csv"))
 
 ### produce plots (optional)
 if(plot_results==T) {
