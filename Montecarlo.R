@@ -189,7 +189,7 @@ results_name <-  paste0(data_srmpulse[i,]$rcp,
                         "_BC",data_srmpulse[i,]$start,
                         "_IChistorical_run")
 
-if (run_parallel==T) {cat("Launching scenario",i,"with gas",gas,"...\n")} else {cat("Solving scenario",i,"with gas",gas,"...\n")}
+cat("Checking scenario",i,"with gas",gas,"...\n")
 
 if (!any(str_detect(str_remove(filelist,".gdx"),results_name)) ) {
   if (run_parallel==T) { 
@@ -198,6 +198,7 @@ if (!any(str_detect(str_remove(filelist,".gdx"),results_name)) ) {
   command <- paste(bsub, gams)
   write(str_remove(command, "-K "), file = sh_file, append = TRUE)
   if (run_hpc==F) {command <- gams}
+  if (run_parallel==T) {cat("Attention! This scenarios was not solved before. \n Launching scenario",i,"with gas",gas,"...\n")} else {cat("Attention! This scenarios was not solved before. \n Solving scenario",i,"with gas",gas,"...\n")}
   if (run_scenarios==T) {ret <- system(command = command, intern = TRUE)}
   }
 
