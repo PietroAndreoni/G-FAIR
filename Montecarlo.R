@@ -8,7 +8,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
+  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
 
 Options:
 -o <res>              Path where the results are (default: Results)
@@ -22,6 +22,7 @@ Options:
 -e <end_job>          End of line to start calling the scenarios
 -q <which_queue>      Select queue to send the jobs to (for parallel solving)
 -m <max_scenarios>    Maximum scenarios to send to solve
+-x <rerun_problem>    T to avoid rerunning problematic scenarios (default)
 ' -> doc
 
 library(docopt)
@@ -44,9 +45,10 @@ drawln <- function(median,std,plot=F) {
 # logical
 generate_data = ifelse(is.null(opts[["g"]]), T, as.logical(opts["g"]) )
 overwrite_data = ifelse(is.null(opts[["w"]]), F, as.logical(opts["w"]) )
-run_scenarios = ifelse(is.null(opts[["r"]]), T, as.logical(opts["p"]) )
-run_parallel = ifelse(is.null(opts[["p"]]), T, as.logical(opts["r"]) )
+run_scenarios = ifelse(is.null(opts[["r"]]), T, as.logical(opts["r"]) )
+run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
 run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
+rerun_problem = ifelse(is.null(opts[["x"]]),T, as.logical(opts["x"]) )
 
 # numeric
 n_scenarios = ifelse(is.null(opts[["n"]]), 10, as.numeric(opts["n"]) )
@@ -61,6 +63,7 @@ which_queue = ifelse(is.null(opts[["q"]]), "p_short", as.character(opts["q"]) )
 # Define the path to the .ssh file
 sh_file <- paste0(res,"/montecarlo.sh" ) 
 scenarios_launched <- 0
+problematic_data <- data.frame()
 
 # Make sure the file exists (create it if not)
 if (!dir.exists(res)) {
@@ -74,7 +77,12 @@ if (!file.exists(sh_file)) {
   file.remove(sh_file)
   file.create(sh_file)}
 
+if (file.exists(paste0(res,"/problematic_scenarios.csv"))) {
+  problematic_data <- data.frame(read.csv(paste0(res,"/problematic_scenarios.csv"))) %>% select(-X)
+}
 cat("Generating data... \n")
+
+if(generate_data==F & overwrite_data==T) stop("Invalid options! You cannot overwrite old data without generating new ones")
 
 if (generate_data==F & !file.exists(paste0(res,"/id_montecarlo.csv"))) stop("Please generate new data if no pre-existing are available")
 
@@ -153,7 +161,7 @@ data <- as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"))) %>% select(-X)
 # select unique scenarios 
 data_srmpulse <- data %>% 
   select(ecs, tcr, rcp, pulse, cool, term, start, term_delta) %>% unique() 
-
+if (rerun_problem==F) data_srmpulse <- data_srmpulse %>% anti_join(problematic_data %>% select(-error,-gas) %>% unique())
 cat("Launching jobs... \n")
 
 filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
@@ -199,12 +207,26 @@ if (!any(str_detect(str_remove(filelist,".gdx"),results_name)) ) {
   write(str_remove(command, "-K "), file = sh_file, append = TRUE)
   if (run_hpc==F) {command <- gams}
   if (run_parallel==T) {cat("Attention! This scenarios was not solved before. \n Launching scenario",i,"with gas",gas,"...\n")} else {cat("Attention! This scenarios was not solved before. \n Solving scenario",i,"with gas",gas,"...\n")}
-  if (run_scenarios==T) {ret <- system(command = command, intern = TRUE)}
+  if (run_scenarios==T) {
+    ret <- system(command = command, intern = TRUE)
+    if(!is.null(attr(ret,"status")) )  {
+      cat("Careful! scenario",i,"with gas",gas,"couldn't solve...\n")
+      problematic_data <- problematic_data %>% 
+        bind_rows(c(data_srmpulse[i,],error=attr(ret,"status"),gas=gas)) }
+  }
   }
 
-if(run_parallel==T & scenarios_launched >= max_scenarios) stop("The maximum number of scenarios (",max_scenarios,") has been launched for this batch")
+if(run_parallel==T & scenarios_launched >= max_scenarios) {
+  if(nrow(problematic_data)!=0) {
+    cat("Careful! Some scenarios couldn't solve. Information is stored in problematic_scenarios.csv")
+    write.csv(problematic_data,file=paste0(res,"/problematic_scenarios.csv")) }
+  stop("The maximum number of scenarios (",max_scenarios,") has been launched for this batch") }
 }
 
 }
-  
+
+if(nrow(problematic_data)!=0) {
+  cat("Careful! Some scenarios couldn't solve. Information is stored in problematic_scenarios.csv")
+  write.csv(problematic_data,file=paste0(res,"/problematic_scenarios.csv")) }
+
 
