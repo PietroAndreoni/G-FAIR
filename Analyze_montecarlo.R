@@ -293,46 +293,101 @@ write.csv(damnpv,file=paste0(output_folder,"/output_analysis.csv"))
 
 ### produce plots (optional)
 if(plot_results==T) {
-damnpv %>% 
+
+damnpv <- bind_rows(lapply(list.files(output_folder, pattern = "\\.csv$", full.names = TRUE), read.csv))
+  
+damnorm <- damnpv %>% 
+  filter(scc>0 & npc_srm>0 & delta>0) %>% 
+  group_by(gas) %>% mutate(npc_norm=npc_srm/median(npc_srm,na.rm=TRUE))
+
+damnorm %>% 
   group_by(gas) %>% 
-  summarise(med=median(npc_srm,na.rm=TRUE),sd=sd(npc_srm,na.rm=TRUE) )
+  summarise(p66=quantile(npc_norm,0.66,na.rm=TRUE), 
+            p75=quantile(npc_norm,0.75,na.rm=TRUE),
+            p90=quantile(npc_norm,0.9,na.rm=TRUE), 
+            p95=quantile(npc_norm,0.95,na.rm=TRUE), 
+            p99=quantile(npc_norm,0.99,na.rm=TRUE), 
+            p999=quantile(npc_norm,0.999,na.rm=TRUE)) 
 
-damnorm <- damnpv %>% group_by(gas) %>% mutate(npc_norm=npc_srm/median(npc_srm,na.rm=TRUE))
+ggplot(damnorm) +
+  geom_density(aes(x=npc_norm,color=gas),adjust=10) +
+  coord_cartesian(xlim = c(0, quantile(damnorm[gas=="co2"]$npc_norm, 0.95, na.rm=TRUE)) )
 
-ggplot(damnorm %>% filter(gas=="co2")) +
-  geom_boxplot(aes(x=npc_norm,color=gas),outlier.shape = NA) +
-  facet_wrap(gas~.,scales="free") +
-  coord_cartesian(xlim = quantile(damnorm$npc_norm, c(0.03, 0.97), na.rm=TRUE))
+ggplot(damnpv %>% filter(scc>0 & npc_srm>0 & gas=="ch4" & delta>0 )) +
+  geom_density(aes(x=npc_srm,color=gas), adjust=10) +
+  coord_cartesian(xlim = c(0, 10000))
+
+ggplot(damnpv %>% filter(scc>0 & npc_srm>0 & gas=="co2" & delta>0  & npc_srm <1000)) +
+  geom_density(aes(x=npc_srm,color=gas), adjust=10) +
+  coord_cartesian(xlim = c(0, 100))
 
 library(gsaot)
-gsoat_data <- damnpv %>% filter(gas=="ch4") %>% ungroup()
+damnpv <- damnpv %>%  
+  ungroup() %>% 
+  select(-X) %>% 
+  mutate(across(c(tcr, ecs, term, theta, pulse_time, geo_start, geo_end, term, delta, prob), as.numeric))
+
+gsoat_data <- damnpv %>% filter(gas=="ch4" & scc>0 & npc_srm>0 & delta>0) 
+
 stat_analysis_ch4 <- ot_indices_1d(gsoat_data %>% 
                                      select(rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, delta, prob, alpha, theta, term),
                                    gsoat_data %>% pull(npc_srm ), 
-                                   M= 15, 
-                                   boot = T, 
+                                   M= 15,
+                                   boot = T,
                                    R = 100)
-lowerbound_ch4 <- lower_bound(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
+lowerbound_ch4 <- irrelevance_threshold(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
 
-gsoat_data <- damnpv %>% filter(gas=="co2") %>% ungroup()
+gsoat_data <- damnpv %>% filter(gas=="co2" & scc>0 & npc_srm>0 & delta>0) %>% ungroup()
+
 stat_analysis_co2 <- ot_indices_1d(gsoat_data %>% 
                                      select(rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, delta, prob, alpha, theta, term),
                                    gsoat_data %>% pull(npc_srm), 
-                                   M= 15, 
-                                   boot = T, 
+                                   M= 15,
+                                   boot = T,
                                    R = 100)
-lowerbound_co2 <- lower_bound(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
+lowerbound_co2 <- irrelevance_threshold(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
 
-ggplot(as_tibble(stat_analysis_ch4$indices_ci)) + 
-  geom_bar(aes(x=input,
+
+stat_analysis_norm <- ot_indices_1d(damnorm %>% 
+                                     select(gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, delta, prob, alpha, theta, term),
+                                    damnorm %>% pull(npc_norm ), 
+                                   M= 15,
+                                   boot = T,
+                                   R = 100)
+lowerbound_norm <- irrelevance_threshold(damnorm %>% pull(npc_norm), M= 15, solver="1d")
+
+
+ggplot(as_tibble(stat_analysis_norm$indices_ci)  ) + 
+  geom_bar(aes(x=reorder(input, -original),
+               y=original,
+               fill=input),stat="identity",color="black") + 
+  geom_hline(yintercept=lowerbound_norm$indices) +
+  geom_errorbar(aes(x=input,
+                    ymin=low.ci,
+                    ymax=high.ci),stat="identity",position="dodge",color="black") +
+  ylab("importance [ch4]") + xlab("") + 
+  theme(legend.position = "none")
+
+ggplot(as_tibble(stat_analysis_ch4$indices_ci)  ) + 
+  geom_bar(aes(x=reorder(input, -original),
                y=original,
                fill=input),stat="identity",color="black") + 
   geom_hline(yintercept=lowerbound_ch4$indices) +
-  ylab("importance [ch4]") + xlab("")
+  geom_errorbar(aes(x=reorder(input, -original),
+                    ymin=low.ci,
+                    ymax=high.ci),stat="identity",position="dodge",color="black") +
+  ylab("importance [ch4]") + xlab("") + 
+  theme(legend.position = "none")
 
-ggplot(as_tibble(stat_analysis_co2$indices_ci)) + 
-  geom_bar(aes(x=input,
+ggplot(as_tibble(stat_analysis_co2$indices_ci)  ) + 
+  geom_bar(aes(x=reorder(input, -original),
                y=original,
-               fill=input),stat="identity",color="black") +
-  geom_hline(yintercept=lowerbound$indices) +
-  ylab("importance [co2]") + xlab("") }
+               fill=input),stat="identity",color="black") + 
+  geom_hline(yintercept=lowerbound_co2$indices) +
+  geom_errorbar(aes(x=reorder(input, -original),
+                    ymin=low.ci,
+                    ymax=high.ci),stat="identity",position="dodge",color="black") +
+  ylab("importance [co2]") + xlab("") + 
+  theme(legend.position = "none")
+
+}

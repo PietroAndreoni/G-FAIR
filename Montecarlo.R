@@ -8,7 +8,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] 
+  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] [--seed <seed>] 
 
 Options:
 -o <res>              Path where the results are (default: Results)
@@ -23,6 +23,7 @@ Options:
 -q <which_queue>      Select queue to send the jobs to (for parallel solving)
 -m <max_scenarios>    Maximum scenarios to send to solve
 -x <rerun_problem>    T to avoid rerunning problematic scenarios (default)
+--seed <seed>   seed number (for reproducibility)
 ' -> doc
 
 library(docopt)
@@ -52,6 +53,7 @@ rerun_problem = ifelse(is.null(opts[["x"]]),T, as.logical(opts["x"]) )
 
 # numeric
 n_scenarios = ifelse(is.null(opts[["n"]]), 10, as.numeric(opts["n"]) )
+seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 max_scenarios = ifelse(is.null(opts[["m"]]), 100, as.numeric(opts["m"]) )
 start_job = ifelse(is.null(opts[["s"]]), 1, as.numeric(opts["s"]) )
 end_job = ifelse(is.null(opts[["e"]]), 100000, as.numeric(opts["e"]) )
@@ -85,6 +87,8 @@ cat("Generating data... \n")
 if(generate_data==F & overwrite_data==T) stop("Invalid options! You cannot overwrite old data without generating new ones")
 
 if (generate_data==F & !file.exists(paste0(res,"/id_montecarlo.csv"))) stop("Please generate new data if no pre-existing are available")
+
+set.seed(seed)
 
 if (generate_data==T) {
 
