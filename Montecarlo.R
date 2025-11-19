@@ -8,7 +8,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-h <run_hpc>] [-s <start_job>] [-e <end_job>] [--seed <seed>] 
+  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--seed <seed>] 
 
 Options:
 -o <res>              Path where the results are (default: Results)
@@ -17,13 +17,13 @@ Options:
 -w <overwrite_data>   T/F to overwrite old realizations
 -r <run_scenarios>    T/F to run or just generate scenarios (in .sh script)
 -p <run_parallel>     T/F if to run in parallel or in series (for Juno)
--h <run_hpc>          T/F if to run on Juno or local (windows)
 -s <start_job>        Number of line to start calling the scenarios 
 -e <end_job>          End of line to start calling the scenarios
 -q <which_queue>      Select queue to send the jobs to (for parallel solving)
 -m <max_scenarios>    Maximum scenarios to send to solve
 -x <rerun_problem>    T to avoid rerunning problematic scenarios (default)
---seed <seed>   seed number (for reproducibility)
+--seed <seed>         seed number (for reproducibility)
+--hpc <run_hpc>       T/F if to run on Juno or local (windows)
 ' -> doc
 
 library(docopt)
@@ -45,14 +45,14 @@ drawln <- function(median,std,plot=F) {
 
 # logical
 generate_data = ifelse(is.null(opts[["g"]]), T, as.logical(opts["g"]) )
-overwrite_data = ifelse(is.null(opts[["w"]]), F, as.logical(opts["w"]) )
+overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
 run_scenarios = ifelse(is.null(opts[["r"]]), T, as.logical(opts["r"]) )
 run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
-run_hpc = ifelse(is.null(opts[["h"]]), T, as.logical(opts["h"]) )
+run_hpc = ifelse(is.null(opts[["hpc"]]), F, as.logical(opts["hpc"]) )
 rerun_problem = ifelse(is.null(opts[["x"]]),T, as.logical(opts["x"]) )
 
 # numeric
-n_scenarios = ifelse(is.null(opts[["n"]]), 10, as.numeric(opts["n"]) )
+n_scenarios = ifelse(is.null(opts[["n"]]), 5, as.numeric(opts["n"]) )
 seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 max_scenarios = ifelse(is.null(opts[["m"]]), 100, as.numeric(opts["m"]) )
 start_job = ifelse(is.null(opts[["s"]]), 1, as.numeric(opts["s"]) )
@@ -123,20 +123,6 @@ for (i in seq(1,n_scenarios,by=1)) {
 # start year 
   start <- sample(seq(2025,2100,by=25),1)
 
-#### parameters post-solve
-
-# theta
-  theta <- round(drawln(15,7),0)
-
-# alpha
-  alpha <- round(drawln(0.00575,0.00575*150/(230-100)),5)
-
-# delta 
-  delta <- sample(seq(0,0.1,by=0.01),1)
-
-# prob 
-  prob <- sample(seq(0,1,by=0.05),1)
-
 # time of termination event 
   time_term <- sample(seq(10,500,by=10),1)
   
@@ -150,55 +136,54 @@ for (i in seq(1,n_scenarios,by=1)) {
                        cool=cool,
                        term=term,
                        start=start,
-                       theta=theta,
-                       alpha=alpha,
-                       delta=delta,
-                       term_delta=time_term,
-                       prob=prob) ) }
+                       term_delta=time_term) ) }
+
+data <- data %>% 
+  mutate(term_delta=pulse+term_delta,
+         term=ifelse(cool==0,2700,term),
+         start=ifelse(cool==0,2700,start) ) %>% 
+  unique()
 
 write.csv(data,file=paste0(res,"/id_montecarlo.csv")) } else {
   
 data <- as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"))) %>% select(-X)
 
 }
- 
-# select unique scenarios 
-data_srmpulse <- data %>% 
-  select(ecs, tcr, rcp, pulse, cool, term, start, term_delta) %>% unique() 
-if (rerun_problem==F) data_srmpulse <- data_srmpulse %>% anti_join(problematic_data %>% select(-error,-gas) %>% unique())
+
+if (rerun_problem==F) data <- data %>% anti_join(problematic_data %>% select(-error,-gas) %>% unique())
 cat("Launching jobs... \n")
 
 filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 
 for (gas in c("ch4","co2")) {
   
-for (i in seq(start_job,min(end_job,nrow(data_srmpulse))) ) {
+for (i in seq(start_job,min(end_job,nrow(data))) ) {
 bsub <- paste("bsub", "-q",which_queue, "-n 1",
               "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
 
 gams <- paste0("gams FAIR.gms --experiment=srm",
                " --gas=",gas,
-              " --ecs=",data_srmpulse[i,]$ecs,
-              " --tcr=",data_srmpulse[i,]$tcr,
-              " --rcp=",data_srmpulse[i,]$rcp,
-              " --pulse_time=",data_srmpulse[i,]$pulse,
-              " --rate_of_cooling=",data_srmpulse[i,]$cool,
-              " --start_rampdown=",data_srmpulse[i,]$term-100,
-              " --end_rampdown=",data_srmpulse[i,]$term,
-              " --start_rampup=",data_srmpulse[i,]$start,
-              " --end_rampup=",data_srmpulse[i,]$start+100,
-              " --termination_time=",data_srmpulse[i,]$term_delta,
+              " --ecs=",data[i,]$ecs,
+              " --tcr=",data[i,]$tcr,
+              " --rcp=",data[i,]$rcp,
+              " --pulse_time=",data[i,]$pulse,
+              " --rate_of_cooling=",data[i,]$cool,
+              " --start_rampdown=",data[i,]$term-100,
+              " --end_rampdown=",data[i,]$term,
+              " --start_rampup=",data[i,]$start,
+              " --end_rampup=",data[i,]$start+100,
+              " --termination_time=",data[i,]$term_delta,
               " --results_folder=",res)
 
-results_name <-  paste0(data_srmpulse[i,]$rcp,
-                        "_EXPsrmpulsemaskedterm_TER",data_srmpulse[i,]$term_delta,
+results_name <-  paste0(data[i,]$rcp,
+                        "_EXPsrmpulsemaskedterm_TER",data[i,]$term_delta,
                         "_GAS",gas,
-                        "_ECS",data_srmpulse[i,]$ecs,
-                        "_TCR",data_srmpulse[i,]$tcr,
-                        "_PT",data_srmpulse[i,]$pulse,
-                        "_RC",data_srmpulse[i,]$cool,
-                        "_EC",data_srmpulse[i,]$term,
-                        "_BC",data_srmpulse[i,]$start,
+                        "_ECS",data[i,]$ecs,
+                        "_TCR",data[i,]$tcr,
+                        "_PT",data[i,]$pulse,
+                        "_RC",data[i,]$cool,
+                        "_EC",data[i,]$term,
+                        "_BC",data[i,]$start,
                         "_IChistorical_run")
 
 cat("Checking scenario",i,"with gas",gas,"...\n")
@@ -214,9 +199,11 @@ if (!any(str_detect(str_remove(filelist,".gdx"),results_name)) ) {
   if (run_scenarios==T) {
     ret <- system(command = command, intern = TRUE)
     if(!is.null(attr(ret,"status")) )  {
-      cat("Careful! scenario",i,"with gas",gas,"couldn't solve...\n")
-      problematic_data <- problematic_data %>% 
-        bind_rows(c(data_srmpulse[i,],error=attr(ret,"status"),gas=gas)) }
+      if(attr(ret,"status")!=112) {
+        cat("Careful! scenario",i,"with gas",gas,"couldn't solve...\n")
+        problematic_data <- problematic_data %>% 
+          bind_rows(c(data[i,],error=attr(ret,"status"),gas=gas)) } 
+      }
   }
   }
 
