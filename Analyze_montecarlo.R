@@ -35,7 +35,8 @@ extract_names <- function(.x) {
 sanitize <- function(.x) {
 .x %>% as_tibble() %>% 
   mutate(t=as.numeric(t) ) %>% 
-    filter(t<=480)}
+    filter(t<=480) %>% 
+    select(-gdx)}
 
 
 # Usage
@@ -93,6 +94,13 @@ all_scenarios <- data.frame(filelist) %>%
   rename(gdx=filelist) %>% 
   extract_names(.) 
 
+# discard duplicates in case any (possible in multiple folders)
+all_scenarios <- all_scenarios %>% 
+  group_by(file) %>% 
+  filter(row_number()==1) %>% ungroup() 
+
+cat("Removing", length(filelist) - nrow(all_scenarios), "duplicate scenarios \n")
+
 # check that: (1) srm, srmpulse, srmpulsemasked, srmpulsemaskedterm are equal in number
 check1 <- all_scenarios %>% 
   filter(!experiment %in% c("base","pulse") ) %>% 
@@ -110,11 +118,6 @@ check2 <-  inner_join(all_scenarios %>% select(-term),check1 %>% select(-tot,-di
 sanitized_names <- inner_join(all_scenarios,check2) %>% 
   bind_rows(inner_join(all_scenarios %>% filter(experiment=="pulse"),check2 %>% select(gas,rcp,ecs,tcr,pulse_time) ) %>%  unique()) %>% 
   bind_rows(inner_join(all_scenarios %>% filter(experiment=="base"),check2 %>% select(rcp,ecs,tcr) ) %>%  unique())
-
-# discard duplicates in case any (possible in multiple folders)
-sanitized_names <- sanitized_names %>% 
-  group_by(file) %>% 
-  filter(n()==1) 
 
 files <- sanitized_names$gdx 
 
@@ -200,7 +203,7 @@ damnpv_pre <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="srmpuls
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemasked")) %>%
   full_join(background_srm %>% rename(srm=value) %>% filter(experiment=="srmpulsemasked")) %>% 
   full_join(SRM %>% rename(srm_masking=value) %>% filter(experiment=="srmpulsemasked" & srm_masking>=0)) %>% 
-  select(-file,-gdx,-experiment) %>% 
+  select(-file,-experiment) %>% 
   inner_join(FORC %>% filter(ghg=="o3trop") %>% rename(ozone_pulse = value) %>% 
                filter(experiment=="srmpulsemasked") %>% 
                select_at(c("t",scenario_names,"ozone_pulse"))) %>%
@@ -242,7 +245,7 @@ damnpv_post_noterm <- tot_forcing %>% rename(forc=value) %>% filter(experiment==
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemasked")) %>%
   full_join(background_srm %>% rename(srm=value) %>% filter(experiment=="srmpulsemasked")) %>% 
   full_join(SRM %>% rename(srm_masking=value) %>% filter(experiment=="srmpulsemasked" & srm_masking>=0)) %>% 
-  select(-file,-gdx,-experiment) %>% 
+  select(-file,-experiment) %>% 
   inner_join(FORC %>% filter(ghg=="o3trop") %>% rename(ozone_pulse = value) %>% 
                filter(experiment=="srmpulsemasked") %>% 
                select_at(c("t",scenario_names,"ozone_pulse"))) %>%
@@ -284,7 +287,7 @@ damnpv_post_term <- tot_forcing %>% rename(forc=value) %>% filter(experiment=="s
   full_join(TATM %>%  rename(temp = value) %>% filter(experiment=="srmpulsemaskedterm")) %>%
   full_join(background_srm %>% rename(srm=value) %>% filter(experiment=="srmpulsemaskedterm")) %>% 
   full_join(SRM %>% rename(srm_masking=value) %>% filter(experiment=="srmpulsemaskedterm" & srm_masking>=0)) %>% 
-  select(-file,-gdx,-experiment) %>% 
+  select(-file,-experiment) %>% 
   inner_join(FORC %>% filter(ghg=="o3trop") %>% rename(ozone_pulse = value) %>% 
                filter(experiment=="srmpulsemasked") %>% 
                select_at(setdiff(c("t", scenario_names, "ozone_pulse"), "term")) ) %>%
@@ -386,8 +389,8 @@ damnorm <- damnpv %>%
 damnorm_diff <- damnorm %>% 
   filter(scc>0 & npc_srm>0 & delta>0) %>%
   select(-scc,-npc_srm,-pulse_size,-costnpv) %>% 
-  pivot_wider(values_from="npc_norm",names_from="gas") %>% 
-  unnest(ch4,co2) %>% 
+  tidyr::pivot_wider(values_from="npc_norm",names_from="gas") %>% 
+  tidyr::unnest(ch4,co2) %>% 
   filter(!is.null(ch4) & !is.null(co2)) %>% 
   mutate(norm_diff=co2-ch4)
 
