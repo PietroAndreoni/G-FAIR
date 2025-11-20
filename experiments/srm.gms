@@ -23,7 +23,7 @@ $elseif.source %methane_source%=="biogenic"
 FF_CH4.fx('%pulse_time%') = FF_CH4.l('%pulse_time%') - %pulse_size%/100 * ( 0 + ( emissions_rcp('2005','%rcp%','%gas%') / W_EMI.l('ch4','%pulse_time%') )$(sameas('%gas%','ch4')) );
 $elseif.source %methane_source%=="mix"
 FF_CH4.fx('%pulse_time%') = FF_CH4.l('%pulse_time%');
-$endif
+$endif.source
 
 solve fair using nlp minimizing OBJ;
 abort$(not (fair.solvestat eq 1 and (fair.modelstat eq 1 or fair.modelstat eq 2))) "Base model is not solving";
@@ -57,7 +57,7 @@ $elseif.source %methane_source%=="biogenic"
 FF_CH4.fx('%pulse_time%') = FF_CH4.l('%pulse_time%') - %pulse_size%/100 * ( 0 + emissions_rcp('2005','%rcp%','%gas%') / W_EMI.l('ch4','%pulse_time%') )$(sameas('%gas%','ch4'));
 $elseif.source %methane_source%=="mix"
 FF_CH4.fx('%pulse_time%') = FF_CH4.l('%pulse_time%');
-$endif
+$endif.source
 
 
 solve fair using nlp minimizing OBJ;
