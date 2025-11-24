@@ -3,6 +3,8 @@ library(stringr)
 library(gdxtools)
 library(EnvStats) # for rtri
 
+start.time <- Sys.time()
+
 # extract names function rewritten using data.table/vector ops
 extract_names_dt <- function(files_vec) {
   DT <- data.table(gdx = files_vec)
@@ -76,6 +78,67 @@ drawln <- function(median,std,n=1,plot=F) {
     plot(density(draws[draws > 0 & draws < 10*std])) }
   
   return(rlnorm(n, location, shape))
+}
+
+
+prepare_join_table <- function(filter_experiment, include_term = TRUE) {
+  
+  temp_exp <- copy(TATM)[experiment == filter_experiment]  # make copy to avoid modifying original
+  temp_exp[, c("file", "experiment") := NULL]               # remove columns
+  setnames(temp_exp, "value", "temp", skip_absent = TRUE)
+  
+  backsrm_exp <- copy(background_srm)[experiment == filter_experiment]  # make copy to avoid modifying original
+  backsrm_exp[, c("file", "experiment") := NULL]               # remove columns
+  setnames(backsrm_exp, "value", "srm", skip_absent = TRUE)
+  
+  dsrm_exp <- copy(SRM)[experiment == filter_experiment]  # make copy to avoid modifying original
+  dsrm_exp[, c("file", "experiment") := NULL]               # remove columns
+  setnames(dsrm_exp, "value", "srm_masking", skip_absent = TRUE)
+  
+  tot_forcing_exp <- copy(tot_forcing)[experiment == filter_experiment]  # make copy to avoid modifying original
+  tot_forcing_exp[, c("file", "experiment") := NULL]               # remove columns
+  setnames(tot_forcing_exp, "value", "forc", skip_absent = TRUE)
+  
+  ozone_exp <- copy(FORC)[ghg == "o3trop" & experiment == filter_experiment]
+  ozone_exp[, c("file", "experiment","ghg") := NULL]
+  setnames(ozone_exp, "value", "ozone_pulse", skip_absent = TRUE)
+  
+  ozone_srm <- copy(FORC)[ghg == "o3trop" & experiment == "srm"]
+  ozone_srm[, c("file", "experiment","term","ghg") := NULL]
+  setnames(ozone_srm, "value", "ozone_base", skip_absent = TRUE)
+  
+  cols <- c("t",base_scenarios,"value")
+  temp_base <- copy(TATM)[experiment == "base", ..cols]
+  setnames(temp_base, "value", "temp_base", skip_absent = TRUE)
+  
+  temp_srm <- copy(TATM)[experiment == "srm"]
+  temp_srm[, c("file", "experiment","term") := NULL]
+  setnames(temp_srm, "value", "temp_srm", skip_absent = TRUE)
+  
+  temp_srmpulse <- copy(TATM)[experiment == "srmpulse"]
+  temp_srmpulse[, c("file", "experiment","term") := NULL]
+  setnames(temp_srmpulse, "value", "temp_srmpulse", skip_absent = TRUE)
+  
+  cols <- c("t",pulse_scenarios,"value")
+  temp_ghgpulse <- copy(TATM)[experiment == "pulse", ..cols]
+  setnames(temp_ghgpulse, "value", "temp_ghgpulse", skip_absent = TRUE)
+  
+  base <- copy(full_grid)
+  base <- base[tot_forcing_exp, on = c("t", scenario_names)]
+  base <- base[temp_exp, on = c("t", scenario_names)]
+  base <- backsrm_exp[base, on = c("t",scenario_names)]
+  base <- dsrm_exp[base, on = c("t",scenario_names)]
+  base <- ozone_exp[base, on = c("t", scenario_names)]
+  base <- ozone_srm[base, on = setdiff(c("t", scenario_names),"term") ]
+  base <- temp_srm[base, on = setdiff(c("t", scenario_names),"term")]
+  base <- temp_srmpulse[base, on = setdiff(c("t", scenario_names),"term")]
+  base <- temp_base[base, on = c("t", base_scenarios)]
+  base <- temp_ghgpulse[base, on = c("t",pulse_scenarios), nomatch = NULL]
+  
+  replace_num_na0(base)
+  base[, term := NULL] # remove term (readded later)
+  base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("term","gas")))
+  return(base)
 }
 
 # Usage
@@ -235,7 +298,7 @@ id_montecarlo[, rcp := str_remove(rcp, "RCP")]
 setnames(id_montecarlo, c("pulse","cool","term_delta","start","term"), c("pulse_time","cool_rate","term","geo_start","geo_end"))
 id_montecarlo <- unique(id_montecarlo)
 
-
+cat("Proucing montecarlo realizations...")
 n_scenarios <- nrow(id_montecarlo)
 set.seed(seed)
 # add uncertainties
@@ -251,68 +314,7 @@ id_montecarlo[, dg := round(rnorm(n_scenarios,mean=0.015,sd=0.005),4)]
 all_names <- c("gas", names(id_montecarlo))
 
 
-prepare_join_table <- function(filter_experiment, include_term = TRUE) {
-  
-  temp_exp <- copy(TATM)[experiment == filter_experiment]  # make copy to avoid modifying original
-  temp_exp[, c("file", "experiment") := NULL]               # remove columns
-  setnames(temp_exp, "value", "temp", skip_absent = TRUE)
-  
-  backsrm_exp <- copy(background_srm)[experiment == filter_experiment]  # make copy to avoid modifying original
-  backsrm_exp[, c("file", "experiment") := NULL]               # remove columns
-  setnames(backsrm_exp, "value", "srm", skip_absent = TRUE)
-  
-  dsrm_exp <- copy(SRM)[experiment == filter_experiment]  # make copy to avoid modifying original
-  dsrm_exp[, c("file", "experiment") := NULL]               # remove columns
-  setnames(dsrm_exp, "value", "srm_masking", skip_absent = TRUE)
-  
-  tot_forcing_exp <- copy(tot_forcing)[experiment == filter_experiment]  # make copy to avoid modifying original
-  tot_forcing_exp[, c("file", "experiment") := NULL]               # remove columns
-  setnames(tot_forcing_exp, "value", "forc", skip_absent = TRUE)
-  
-  ozone_exp <- copy(FORC)[ghg == "o3trop" & experiment == filter_experiment]
-  ozone_exp[, c("file", "experiment","ghg") := NULL]
-  setnames(ozone_exp, "value", "ozone_pulse", skip_absent = TRUE)
-  
-  ozone_srm <- copy(FORC)[ghg == "o3trop" & experiment == "srm"]
-  ozone_srm[, c("file", "experiment","term","ghg") := NULL]
-  setnames(ozone_srm, "value", "ozone_base", skip_absent = TRUE)
-  
-  cols <- c("t",base_scenarios,"value")
-  temp_base <- copy(TATM)[experiment == "base", ..cols]
-  setnames(temp_base, "value", "temp_base", skip_absent = TRUE)
-  
-  temp_srm <- copy(TATM)[experiment == "srm"]
-  temp_srm[, c("file", "experiment","term") := NULL]
-  setnames(temp_srm, "value", "temp_srm", skip_absent = TRUE)
-  
-  temp_srmpulse <- copy(TATM)[experiment == "srmpulse"]
-  temp_srmpulse[, c("file", "experiment","term") := NULL]
-  setnames(temp_srmpulse, "value", "temp_srmpulse", skip_absent = TRUE)
-  
-  cols <- c("t",pulse_scenarios,"value")
-  temp_ghgpulse <- copy(TATM)[experiment == "pulse", ..cols]
-  setnames(temp_ghgpulse, "value", "temp_ghgpulse", skip_absent = TRUE)
-  
-  base <- copy(full_grid)
-  base <- base[tot_forcing_exp, on = c("t", scenario_names)]
-  base <- base[temp_exp, on = c("t", scenario_names)]
-  base <- backsrm_exp[base, on = c("t",scenario_names)]
-  base <- dsrm_exp[base, on = c("t",scenario_names)]
-  base <- ozone_exp[base, on = c("t", scenario_names)]
-  base <- ozone_srm[base, on = setdiff(c("t", scenario_names),"term") ]
-  base <- temp_srm[base, on = setdiff(c("t", scenario_names),"term")]
-  base <- temp_srmpulse[base, on = setdiff(c("t", scenario_names),"term")]
-  base <- temp_base[base, on = c("t", base_scenarios)]
-  base <- temp_ghgpulse[base, on = c("t",pulse_scenarios), nomatch = NULL]
-  
-  replace_num_na0(base)
-  base[, term := NULL] # remove term (readded later)
-  base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("term","gas")))
-  return(base)
-}
-
-
-
+cat("Analyzing the data...")
 # build and aggregate for pre, post_noterm, post_term using above functions
 dt_noterm <- prepare_join_table("srmpulsemasked")
 dt_pre <- dt_noterm[ t >= as.numeric(pulse_time) & t <= as.numeric(term) ]
@@ -325,3 +327,47 @@ dt_term <- prepare_join_table("srmpulsemaskedterm")
 dt_post_term <- dt_term[ t >= as.numeric(pulse_time) & t > as.numeric(term) ]
 res_post_term <- npv_aggregator(dt_post_term, all_names)
 
+# pulse_size & scc (reuse earlier approach but modularized)
+pulse_size <- W_EMI[ ghg == gas & experiment %in% c("srm","srmpulse"), .(t, value, experiment, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)]
+pulse_size <- pulse_size[, .(pulse_size = value[ experiment == "srmpulse" ] - value[ experiment == "srm" ]), by = .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)]
+pulse_size <- pulse_size[ pulse_size != 0 ]
+pulse_size[ , pulse_size := ifelse(gas == "co2", pulse_size * 1e9, pulse_size * 1e6)]
+
+# scc calculation (modular)
+scc <- merge(
+  TATM[experiment == "srm", .(t, temp_srm = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)],
+  TATM[experiment == "srmpulse", .(t, temp_srmpulse = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)],
+  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE
+)
+scc <- merge(scc, FORC[ ghg == "o3trop" & experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, ozone_pulse = value)], by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE)
+scc <- merge(scc, FORC[ ghg == "o3trop" & experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, ozone_base = value)],  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
+replace_num_na0(scc)
+scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
+scc <- scc[ t >= as.numeric(pulse_time) ]
+compute_gwpt(scc)
+scc[, tropoz_pollution := vsl * mortality_ozone * (ozone_pulse - ozone_base) * ozone_rftoconc]
+scc[, dam := gwp * ( alpha * ((temp_srmpulse)^2 - (temp_srm)^2) )]
+scc_agg <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = setdiff(all_names, c("gas","theta","term","prob","mortality_srm"))]
+scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
+scc_agg[, scc := damnpv / pulse_size]
+
+# combine results
+combined <- merge(res_pre[, c(all_names, "costnpv"), with = FALSE], res_post_noterm[, c(all_names, "costnpv"), with = FALSE], by = all_names, all = TRUE, suffixes = c("_pre","_postnoterm"))
+combined <- merge(combined, res_post_term[, c(all_names, "costnpv"), with = FALSE], by = all_names, all = TRUE)
+setnames(combined, c("costnpv_pre","costnpv_postnoterm","costnpv"), c("costpre","costpostnoterm","costpostterm"))
+replace_num_na0(combined)
+combined[, costnpv := costpre + as.numeric(prob) * costpostterm + (1 - as.numeric(prob)) * costpostnoterm]
+combined[, c("costpre","costpostterm","costpostnoterm") := NULL]
+combined <- merge(combined, pulse_size, by = intersect(names(combined), names(pulse_size)), all.x = TRUE)
+combined <- merge(combined, scc_agg, by = intersect(names(combined), names(scc_agg)), all.x = TRUE)
+combined[, npc_srm := costnpv / pulse_size]
+
+# ----------------------------
+# Save final output (combined table)
+# ----------------------------
+fwrite(combined, file = file.path(output_folder, "output_analysis_dt.csv"))
+cat("Saved output to:", file.path(output_folder, "output_analysis_dt.csv"), "\n")
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+cat("This code run for exactly",time.taken, "seconds")
