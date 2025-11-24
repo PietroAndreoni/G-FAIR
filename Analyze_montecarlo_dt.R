@@ -1,7 +1,28 @@
-library(data.table)
-library(stringr)
-library(gdxtools)
-library(EnvStats) # for rtri
+install_witchtools <- function(){
+  if (!"remotes" %in% rownames(installed.packages()))
+    install.packages("remotes", repos="http://cloud.r-project.org")
+  remotes::install_github("witch-team/witchtools")
+}
+
+if (!"witchtools" %in% rownames(installed.packages())) {
+  install_witchtools()
+  if (!requireNamespace("witchtools")) stop("Package witchtools not found")
+}
+if (packageVersion("witchtools") < "0.4.0") {
+  cat("Need a more recent version of witchtools. Try to update.\n")
+  install_witchtools()
+  cat(paste("Installed version:",packageVersion("witchtools"),"\n"))
+  if (packageVersion("witchtools") < "0.4.0") {
+    stop("Please install witchtools version >= 0.4.0.\n")
+  }
+}
+
+library(witchtools)
+
+# Packages
+pkgs <- c('data.table','stringr','EnvStats')
+res <- lapply(pkgs, require_package)
+require_gdxtools()
 
 start.time <- Sys.time()
 
