@@ -69,12 +69,13 @@ compute_gwpt <- function(DT, gwp_col = "gwp", dg_col = "dg", t_col = "t") {
 }
 
 npv_aggregator <- function(DT, keep_names = all_names) {
+  DT = copy(DT)
   compute_gwpt(DT)
-  DT[, dam := gwp * (alpha * (temp^2 - temp_srm^2))]
+  DT[, dam := gwp * (alpha * (pmax(0,temp)^2 - pmax(0,temp_srm)^2))]
   DT[, direct_cost := srm_masking * forctoUSD]
-  DT[, srm_pollution := vsl * srm_masking * forctoTg * mortality_srm]
-  DT[, tropoz_pollution := vsl * mortality_ozone * (ozone_pulse - ozone_base) * ozone_rftoconc]
-  DT[, imperfect_masking := 2 * gwp * alpha * temp_base * (1 - cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1 + srm/forc)]
+  DT[, srm_pollution := vsl * (gwpt/gwp) * srm_masking * forctoTg * mortality_srm]
+  DT[, tropoz_pollution := vsl * (gwpt/gwp) * mortality_ozone * (concch4_pulse - concch4_base)]
+  DT[, imperfect_masking := 2 * gwp * alpha * pmax(0,temp_base) * (1 - cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1 + srm/forc)]
   # aggregator
   res <- DT[, .(
     dirnpv = sum(direct_cost / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE),
@@ -120,13 +121,13 @@ prepare_join_table <- function(filter_experiment, include_term = TRUE) {
   tot_forcing_exp[, c("file", "experiment") := NULL]               # remove columns
   setnames(tot_forcing_exp, "value", "forc", skip_absent = TRUE)
   
-  ozone_exp <- copy(FORC)[ghg == "o3trop" & experiment == filter_experiment]
-  ozone_exp[, c("file", "experiment","ghg") := NULL]
-  setnames(ozone_exp, "value", "ozone_pulse", skip_absent = TRUE)
+  concch4_exp <- copy(CONC)[ghg == "ch4" & experiment == filter_experiment]
+  concch4_exp[, c("file", "experiment","ghg") := NULL]
+  setnames(concch4_exp, "value", "concch4_pulse", skip_absent = TRUE)
   
-  ozone_srm <- copy(FORC)[ghg == "o3trop" & experiment == "srm"]
-  ozone_srm[, c("file", "experiment","term","ghg") := NULL]
-  setnames(ozone_srm, "value", "ozone_base", skip_absent = TRUE)
+  concch4_srm <- copy(CONC)[ghg == "ch4" & experiment == "srm"]
+  concch4_srm[, c("file", "experiment","term","ghg") := NULL]
+  setnames(concch4_srm, "value", "concch4_base", skip_absent = TRUE)
   
   cols <- c("t",base_scenarios,"value")
   temp_base <- copy(TATM)[experiment == "base", ..cols]
@@ -149,8 +150,8 @@ prepare_join_table <- function(filter_experiment, include_term = TRUE) {
   base <- base[temp_exp, on = c("t", scenario_names)]
   base <- backsrm_exp[base, on = c("t",scenario_names)]
   base <- dsrm_exp[base, on = c("t",scenario_names)]
-  base <- ozone_exp[base, on = c("t", scenario_names)]
-  base <- ozone_srm[base, on = setdiff(c("t", scenario_names),"term") ]
+  base <- concch4_exp[base, on = c("t", scenario_names)]
+  base <- concch4_srm[base, on = setdiff(c("t", scenario_names),"term") ]
   base <- temp_srm[base, on = setdiff(c("t", scenario_names),"term")]
   base <- temp_srmpulse[base, on = setdiff(c("t", scenario_names),"term")]
   base <- temp_base[base, on = c("t", base_scenarios)]
@@ -285,6 +286,9 @@ FORC <- setDT(gdxtools::batch_extract("FORCING", files = files)$FORCING)
 FORC <- merge(FORC, sanitized_names, by = "gdx", all = FALSE)
 FORC <- sanitize_dt(FORC)
 
+CONC <- setDT(gdxtools::batch_extract("CONC", files = files)$CONC)
+CONC <- merge(CONC, sanitized_names, by = "gdx", all = FALSE)
+CONC <- sanitize_dt(CONC)
 
 SRM <- setDT(gdxtools::batch_extract("SRM", files = files)$SRM)
 SRM <- merge(SRM, sanitized_names, by = "gdx", all = FALSE)
@@ -327,8 +331,10 @@ id_montecarlo[, theta := round(drawln(15,7,n_scenarios),0)]
 id_montecarlo[, alpha := round(drawln(0.00575,0.00575*150/(230-100),n_scenarios),5)]
 id_montecarlo[, delta := round(runif(n_scenarios,0.001,0.07),3)]
 id_montecarlo[, prob := round(runif(n_scenarios,0,1),2)]
-id_montecarlo[, mortality_srm := round(drawln(7400,(16000-2300)/1.96,n_scenarios),0)]
-id_montecarlo[, mortality_ozone := round(EnvStats::rtri(n_scenarios, min = 100, max = 107, mode = 104),1)]
+id_montecarlo[, mortality_srm := round( pmax(0,drawln(7400,(16000-2300)/1.96,n_scenarios),0) ) ]
+# from https://pmc.ncbi.nlm.nih.gov/articles/instance/10631284/bin/NIHMS1940316-supplement-SI.pdf 
+# mortality / 100 ppb pulse of methane 
+id_montecarlo[, mortality_ozone := round( pmax(0,rnorm(n_scenarios,11250,(17500-5000)/1.645) / 100, 0) ) ]
 id_montecarlo[, vsl := round(runif(n_scenarios,1,10),0) * 1e6]
 id_montecarlo[, dg := round(rnorm(n_scenarios,mean=0.015,sd=0.005),4)]
 
@@ -353,6 +359,7 @@ pulse_size <- W_EMI[ ghg == gas & experiment %in% c("srm","srmpulse"), .(t, valu
 pulse_size <- pulse_size[, .(pulse_size = value[ experiment == "srmpulse" ] - value[ experiment == "srm" ]), by = .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)]
 pulse_size <- pulse_size[ pulse_size != 0 ]
 pulse_size[ , pulse_size := ifelse(gas == "co2", pulse_size * 1e9, pulse_size * 1e6)]
+pulse_size[, t:=NULL]
 
 # scc calculation (modular)
 scc <- merge(
@@ -360,14 +367,14 @@ scc <- merge(
   TATM[experiment == "srmpulse", .(t, temp_srmpulse = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)],
   by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE
 )
-scc <- merge(scc, FORC[ ghg == "o3trop" & experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, ozone_pulse = value)], by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE)
-scc <- merge(scc, FORC[ ghg == "o3trop" & experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, ozone_base = value)],  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
+scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE)
+scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_base = value)],  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
 replace_num_na0(scc)
 scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
 scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
-scc[, tropoz_pollution := vsl * mortality_ozone * (ozone_pulse - ozone_base) * ozone_rftoconc]
-scc[, dam := gwp * ( alpha * ((temp_srmpulse)^2 - (temp_srm)^2) )]
+scc[, tropoz_pollution := vsl * (gwpt/gwp) * mortality_ozone * (concch4_pulse - concch4_base)]
+scc[, dam := gwp * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
 scc_agg <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = setdiff(all_names, c("gas","theta","term","prob","mortality_srm"))]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
 scc_agg[, scc := damnpv / pulse_size]
