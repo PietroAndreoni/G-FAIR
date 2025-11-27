@@ -84,8 +84,13 @@ npv_aggregator <- function(DT, keep_names = all_names) {
     masknpv = sum(imperfect_masking / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE),
     damnpv = sum(dam / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)
   ), by = keep_names]
-  res[, costnpv := dirnpv + srmpnpv + ozpnpv + masknpv + damnpv]
-  return(res)
+  # convert to long format
+  res_long <- melt(
+    res,
+    id.vars = keep_names,
+    variable.name = "source",
+    value.name = "cost")
+  return(res_long)
 }
 
 drawln <- function(median,std,n=1,plot=F) {
@@ -101,7 +106,6 @@ drawln <- function(median,std,n=1,plot=F) {
   
   return(rlnorm(n, location, shape))
 }
-
 
 prepare_join_table <- function(filter_experiment, include_term = TRUE) {
   
@@ -276,11 +280,9 @@ TATM <- setDT(gdxtools::batch_extract("TATM", files = files)$TATM)
 TATM <- merge(TATM, sanitized_names, by.x = "gdx", by.y = "gdx", all = FALSE)
 TATM <- sanitize_dt(TATM)
 
-
 W_EMI <- setDT(gdxtools::batch_extract("W_EMI", files = files)$W_EMI)
 W_EMI <- merge(W_EMI, sanitized_names, by = "gdx", all = FALSE)
 W_EMI <- sanitize_dt(W_EMI)
-
 
 FORC <- setDT(gdxtools::batch_extract("FORCING", files = files)$FORCING)
 FORC <- merge(FORC, sanitized_names, by = "gdx", all = FALSE)
@@ -293,7 +295,6 @@ CONC <- sanitize_dt(CONC)
 SRM <- setDT(gdxtools::batch_extract("SRM", files = files)$SRM)
 SRM <- merge(SRM, sanitized_names, by = "gdx", all = FALSE)
 SRM <- sanitize_dt(SRM)
-
 
 background_srm <- setDT(gdxtools::batch_extract("forcing_srm", files = files)$forcing_srm)
 background_srm <- merge(background_srm, sanitized_names, by = "gdx", all = FALSE)
@@ -361,7 +362,7 @@ pulse_size <- pulse_size[ pulse_size != 0 ]
 pulse_size[ , pulse_size := ifelse(gas == "co2", pulse_size * 1e9, pulse_size * 1e6)]
 pulse_size[, t:=NULL]
 
-# scc calculation (modular)
+# scc calculation (with SRM)
 scc <- merge(
   TATM[experiment == "srm", .(t, temp_srm = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)],
   TATM[experiment == "srmpulse", .(t, temp_srmpulse = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)],
@@ -378,22 +379,49 @@ scc[, dam := gwp * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
 scc_agg <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = setdiff(all_names, c("gas","theta","term","prob","mortality_srm"))]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
 scc_agg[, scc := damnpv / pulse_size]
+scc_agg[, c("damnpv","pulse_size") := NULL ]
+
+# scc calculation (w/o SRM)
+scc <- merge(
+  TATM[experiment == "base", .(t, temp_base = value, rcp, ecs, tcr)],
+  TATM[experiment == "pulse", .(t, temp_pulse = value, gas, rcp, ecs, tcr, pulse_time)],
+  by = c("t","rcp","ecs","tcr"), all = FALSE
+)
+scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","pulse_time"), all = FALSE)
+scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "base", .(t, rcp, ecs, tcr, concch4_base = value)],  by = c("t","rcp","ecs","tcr"), all.x = TRUE)
+replace_num_na0(scc)
+scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
+scc <- scc[ t >= as.numeric(pulse_time) ]
+compute_gwpt(scc)
+scc[, tropoz_pollution := vsl * (gwpt/gwp) * mortality_ozone * (concch4_pulse - concch4_base)]
+scc[, dam := gwp * ( alpha * (pmax(0,temp_pulse)^2 - pmax(0,temp_base)^2) )]
+scc_agg2 <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = setdiff(all_names, c("gas","theta","term","prob","mortality_srm"))]
+scc_agg2 <- merge(scc_agg2, pulse_size, by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
+scc_agg2[, scc_nosrm := damnpv / pulse_size]
+scc_agg2[, c("damnpv","pulse_size") := NULL ]
 
 # combine results
-combined <- merge(res_pre[, c(all_names, "costnpv"), with = FALSE], res_post_noterm[, c(all_names, "costnpv"), with = FALSE], by = all_names, all = TRUE, suffixes = c("_pre","_postnoterm"))
-combined <- merge(combined, res_post_term[, c(all_names, "costnpv"), with = FALSE], by = all_names, all = TRUE)
-setnames(combined, c("costnpv_pre","costnpv_postnoterm","costnpv"), c("costpre","costpostnoterm","costpostterm"))
+combined <- merge(res_pre[, c(all_names,"source" ,"cost"), with = FALSE], res_post_noterm[, c(all_names,"source" ,"cost"), with = FALSE], by = c(all_names,"source"), all = TRUE, suffixes = c("_pre","_postnoterm"))
+combined <- merge(combined, res_post_term[, c(all_names, "source" ,"cost"), with = FALSE], by = c(all_names,"source"), all = TRUE)
+setnames(combined, c("cost_pre","cost_postnoterm","cost"), c("costpre","costpostnoterm","costpostterm"))
 replace_num_na0(combined)
-combined[, costnpv := costpre + as.numeric(prob) * costpostterm + (1 - as.numeric(prob)) * costpostnoterm]
+combined[, cost := costpre + as.numeric(prob) * costpostterm + (1 - as.numeric(prob)) * costpostnoterm]
 combined[, c("costpre","costpostterm","costpostnoterm") := NULL]
-combined <- merge(combined, pulse_size, by = intersect(names(combined), names(pulse_size)), all.x = TRUE)
-combined <- merge(combined, scc_agg, by = intersect(names(combined), names(scc_agg)), all.x = TRUE)
-combined[, npc_srm := costnpv / pulse_size]
+replace_num_na0(combined)
+combined_wide <- dcast(
+  combined,
+  formula = as.formula(paste(paste(all_names, collapse = " + "), "~ source")),
+  value.var = "cost"
+)
+combined_wide <- merge(combined_wide, pulse_size, by = intersect(names(combined_wide), names(pulse_size)), all.x = TRUE)
+combined_wide <- merge(combined_wide, scc_agg, by = intersect(names(combined_wide), names(scc_agg)), all.x = TRUE)
+combined_wide <- merge(combined_wide, scc_agg2, by = intersect(names(combined_wide), names(scc_agg2)), all.x = TRUE)
+combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / pulse_size]
 
 # ----------------------------
 # Save final output (combined table)
 # ----------------------------
-fwrite(combined, file = file.path(output_folder, "output_analysis_dt.csv"))
+fwrite(combined_wide, file = file.path(output_folder, "output_analysis_dt.csv"))
 cat("Saved output to:", file.path(output_folder, "output_analysis_dt.csv"), "\n")
 
 end.time <- Sys.time()
