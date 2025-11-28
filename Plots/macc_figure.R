@@ -6,9 +6,20 @@ res <- lapply(pkgs,require_package)
 require_gdxtools()
 igdx(dirname(Sys.which('gams'))) # Please have gams in your PATH!
 
-# load data (provided in 2010 $/tonCeq)
-baseline <- read_parquet("../input/data/harmsen_nonco2_baseline.lz4.parquet")
-macc <- read_parquet("../input/data/harmsen_nonco2_macc.lz4.parquet")
+# load data from Harmsen (provided in 2010 $/tonCeq)
+baseline <- read_parquet("input/data/harmsen_nonco2_baseline.lz4.parquet")
+macc <- read_parquet("input/data/harmsen_nonco2_macc.lz4.parquet")
+
+# enerdata co2 (provided in 2015 $/tonCO2)
+macc_co2 <- read_parquet("input/data/macc_ed_full_2022.lz4.parquet") %>% 
+  filter(Variable=="Emissions") %>% 
+  group_by(Year,Scenario,Carbon_value) %>%
+  summarise(value=sum(Value)) %>% 
+  group_by(Year,Scenario) %>%
+  mutate(miu=(value[Carbon_value==0]-value)/value[Carbon_value==0] ) %>% 
+  rename(cost=Carbon_value,year=Year) %>% 
+  select(Scenario,year,cost,miu)
+  
 
 map_sectors_to_ipcc <- c("fossil"="coal",
                          "fossil"="oil",
@@ -62,13 +73,23 @@ macc_by_gas_w <- macc %>%
   mutate(cost=cost*ar4gwp[e]*12/44) %>%
   select(year,e,cost,miu)
 
-fig3 <- ggplot(macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2020,2050) & cost<10000 )) +
-  #geom_segment(aes(x=0,xend=max(miu*100),y=140,yend=140),linewidth=1.2,linetype=2,color="darkgrey") +
-  geom_rect(aes(xmin=0,xmax=max(miu*100),ymin=320,ymax=670),alpha=0.1,fill="#F8766D") +
+fig3 <- ggplot() +
+  geom_line(data=macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2025,2050) ),
+            aes(x=miu*100,y=cost/ar4gwp["ch4"],linetype=as.factor(year)),linewidth=1.5,color="red")+
+  geom_line(data=macc_co2 %>% filter(year %in% c(2025,2050) & Scenario=="EnerBase" ),
+            aes(x=miu*100,y=cost,linetype=as.factor(year)),linewidth=1.5,color="lightblue")+
+  geom_hline(yintercept=0) +
+  scale_color_manual(values=c("#6BAED6","#08306B")) + 
+  theme_classic() + 
+  ylab("Abatement cost ($/tonCH4)") + xlab("Emission reductions (% of baseline)") +
+  theme(legend.position = "top") + xlim(c(0,100))
+ggsave("figure_3.svg",width=5.5,height=5.5,path=respath,plot=fig3)
+
+
+fig3 <- ggplot() +
   geom_line(aes(x=miu*100,y=cost,color=as.factor(year)),linewidth=1.5)+
   geom_hline(yintercept=0) +
   scale_color_manual(values=c("#6BAED6","#08306B")) + 
   theme_classic() + 
   ylab("Abatement cost ($/tonCH4)") + xlab("Emission reductions (% of baseline)") +
   theme(legend.position = "none")
-ggsave("figure_3.svg",width=5.5,height=5.5,path=respath,plot=fig3)
