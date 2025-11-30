@@ -190,7 +190,7 @@ res <- str_split(res,"-")[[1]]
 
 output_folder <- ifelse(is.null(opts[["o"]]), "Results_output_trynew", as.character(opts["o"]) )
 
-name_output <- paste0("output_",paste0(res, collapse = "_"), ".csv")
+name_output <- paste0("output_", tolower(gsub("[aeiouAEIOU_]", "", paste0(res, collapse = "_"))), ".csv")
 
 
 # Make sure the output folder exists (create it if not)
@@ -305,6 +305,8 @@ if(file.exists(file.path(output_folder, name_output))) {
   existing_output[, names(existing_output) := lapply(.SD, as.character)]
   if (skip_scenarios == F) file.remove(file.path(output_folder, name_output))
   } else {skip_scenarios <- F}
+
+cat("End data preprocessing...\n")
 
 for (n_chunk in seq(1,nrow(all_experiments), by = N+1 )) { 
   
