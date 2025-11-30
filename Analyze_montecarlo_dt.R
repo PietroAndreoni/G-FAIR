@@ -50,6 +50,7 @@ sanitize_dt <- function(DT) {
   if("t" %in% names(DT)) DT[, t := as.numeric(t)]
   if("gdx" %in% names(DT)) DT <- DT[, !"gdx", with = FALSE]
   DT <- DT[ t <= 480 ]
+  DT <- unique(DT)
   return(DT)
 }
 
@@ -171,14 +172,15 @@ prepare_join_table <- function(filter_experiment, include_term = TRUE) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] 
+  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] 
 
 Options:
 -i <res>              Path where the results are (default: Results_montecarlo). For multiple folders separate with -
--o <output_folder>   Where to save results
---hpc <run_hpc>          T/F if running from Juno (T) or local (F) 
--p <plot_results>     T/F to plot data and save data analysis
+-o <output_folder>    Where to save results
+--hpc <run_hpc>       T/F if running from Juno (T) or local (F) 
 --seed <seed>         seed number (for reproducibility)
+--chunk <chunk>       how many scenarios to run together
+--skip <skip>         skip or rerun existing scenarios
 ' -> doc
 
 opts <- docopt(doc, version = 'Montecarlo')
@@ -186,24 +188,29 @@ opts <- docopt(doc, version = 'Montecarlo')
 res <- ifelse(is.null(opts[["i"]]), "Results_montecarlo-Results_montecarlo_2-Results_montecarlo_3", as.character(opts["i"]) )
 res <- str_split(res,"-")[[1]]
 
-output_folder <- ifelse(is.null(opts[["o"]]), "Results_output", as.character(opts["o"]) )
+output_folder <- ifelse(is.null(opts[["o"]]), "Results_output_trynew", as.character(opts["o"]) )
+
+name_output <- paste0("output_",paste0(res, collapse = "_"), ".csv")
+
 
 # Make sure the output folder exists (create it if not)
 if (!dir.exists(output_folder)) {
   dir.create(output_folder)
 }
 
-logfile <- file(file.path(output_folder,"r_console.log"), open = "wt")
-sink(logfile)
-sink(logfile, type = "message")  # capture warnings/errors too
-
 if (any(!dir.exists(res)) ) stop("some of the folder specified do not exsist")
 
-run_hpc = ifelse(is.null(opts[["hpc"]]), T, as.logical(opts["h"]) )
-plot_results = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
+run_hpc = ifelse(is.null(opts[["hpc"]]), T, as.logical(opts["hpc"]) )
 seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
+N = ifelse(is.null(opts[["chunk"]]), 100, as.integer(opts["chunk"]) )
+skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) ) 
 
-if(run_hpc==F) {igdx()} else {igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")}
+if(run_hpc==F) {igdx()} else {
+  igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")
+  logfile <- file(file.path(output_folder,"r_console.log"), open = "wt")
+  sink(logfile)
+  sink(logfile, type = "message")  # capture warnings/errors too
+}
 
 ## climate damage function parameters
 gwp <- 105*1e12 # initial world gdp
@@ -220,93 +227,7 @@ filelist <- filelist[str_detect(filelist, "EXP")]
 
 
 cat("Sanitizing the data...\n")
-all_scenarios <- extract_names_dt(filelist)
-# deduplicate by file
-all_scenarios <- unique(all_scenarios, by = "file")
-cat("Removing", length(filelist) - nrow(all_scenarios), "duplicate scenarios \n")
-
-# keep only experiments that have required companion experiments
-check1 <- copy(all_scenarios)
-# filter out base and pulse
-check1 <- check1[ !experiment %in% c("base","pulse") ]
-setkeyv(check1, c("gas","rcp","cool_rate","pulse_time","geo_start","geo_end","ecs","tcr"))
-check1 <- check1[, .(tot = .N, diff = any(duplicated(experiment))), by = key(check1)]
-check1 <- check1[ tot == 4 & diff == FALSE ]
-check1 <- check1[, c("tot","diff") := NULL ]
-
-
-# Now build check2: keep rows from all_scenarios that match check1 and have pulse and base
-if (nrow(check1) == 0) stop("No complete scenario groups found")
-
-# Join pulses and base
-pulses <- all_scenarios[ experiment == "pulse", .(gas, rcp, ecs, tcr, pulse_time)]
-pulses <- unique(pulses, by =  c("gas","rcp","ecs","tcr","pulse_time"))
-base <- all_scenarios[ experiment == "base", .(rcp, ecs, tcr)]
-base <- unique(base, by =  c("rcp","ecs","tcr"))
-check2 <- merge(check1, pulses, by = c("gas","rcp","ecs","tcr","pulse_time"), all = FALSE)
-check2 <- merge(check2, base, by = c("rcp","ecs","tcr"), all = FALSE)
-
-# sanitized_names: include matching rows from all_scenarios
-sanitized_names <- rbindlist( list(merge(all_scenarios, check2, by = c("gas","rcp","cool_rate","pulse_time","geo_start","geo_end","ecs","tcr"), all = FALSE),
-                    merge(all_scenarios[experiment == "pulse"], pulses, by = c("gas","rcp","ecs","tcr","pulse_time"), all = FALSE),
-                    merge(all_scenarios[experiment == "base"], base, by = c("rcp","ecs","tcr"), all = FALSE)),
-                    use.names=TRUE)
-
-cat(sprintf("Careful! %d scenarios removed.\n", nrow(all_scenarios) - nrow(sanitized_names)))
-
-# add pulse and base unique rows
-files <- sanitized_names$gdx
-
-# extract scenario names
-scenario_names <- setdiff(names(sanitized_names), c("gdx","file","experiment"))
-base_scenarios <- names(base)
-pulse_scenarios <- names(pulses)
-
-# create full grid to handle missing data
-all_t <- seq(1,480)  # or tot_forcing$t
-all_scenarios <- unique(sanitized_names[, ..scenario_names])  # all scenario combinations
-
-# Create the full grid
-full_grid <- CJ(t = all_t, 
-                scenario = 1:nrow(all_scenarios), unique = TRUE)
-
-# Merge scenario columns back
-full_grid <- cbind(full_grid[, -"scenario", with = FALSE], all_scenarios[full_grid$scenario])
-
-
-
-
-cat("Loading the data...\n")
-
-# Batch extract using gdxtools, then join sanitized_names and sanitize
-TATM <- setDT(gdxtools::batch_extract("TATM", files = files)$TATM)
-TATM <- merge(TATM, sanitized_names, by.x = "gdx", by.y = "gdx", all = FALSE)
-TATM <- sanitize_dt(TATM)
-
-W_EMI <- setDT(gdxtools::batch_extract("W_EMI", files = files)$W_EMI)
-W_EMI <- merge(W_EMI, sanitized_names, by = "gdx", all = FALSE)
-W_EMI <- sanitize_dt(W_EMI)
-
-FORC <- setDT(gdxtools::batch_extract("FORCING", files = files)$FORCING)
-FORC <- merge(FORC, sanitized_names, by = "gdx", all = FALSE)
-FORC <- sanitize_dt(FORC)
-
-CONC <- setDT(gdxtools::batch_extract("CONC", files = files)$CONC)
-CONC <- merge(CONC, sanitized_names, by = "gdx", all = FALSE)
-CONC <- sanitize_dt(CONC)
-
-SRM <- setDT(gdxtools::batch_extract("SRM", files = files)$SRM)
-SRM <- merge(SRM, sanitized_names, by = "gdx", all = FALSE)
-SRM <- sanitize_dt(SRM)
-
-background_srm <- setDT(gdxtools::batch_extract("forcing_srm", files = files)$forcing_srm)
-background_srm <- merge(background_srm, sanitized_names, by = "gdx", all = FALSE)
-background_srm <- sanitize_dt(background_srm)
-
-
-# total forcing aggregation (equivalent to dplyr group_by + summarise)
-tot_forcing <- FORC[, .(value = sum(value)), by = c("t", "file",scenario_names, "experiment")]
-
+sanitized_names <- extract_names_dt(filelist)
 
 # Load id_montecarlo from folders
 id_list <- lapply(res, function(folder) {
@@ -344,8 +265,128 @@ id_montecarlo[, dg := round(rnorm(n_scenarios,mean=0.015,sd=0.005),4)]
 
 all_names <- c("gas", names(id_montecarlo))
 
+# extract scenario names
+scenario_names <- setdiff(names(sanitized_names), c("gdx","file","experiment"))
+pulse_scenarios <- setdiff(scenario_names, c("cool_rate","geo_end","geo_start","term"))
+base_scenarios <- setdiff(pulse_scenarios, c("gas","pulse_time"))
+
+# create full grid to handle missing data
+all_t <- seq(1,480)  # or tot_forcing$t
+all_scenarios <- unique(sanitized_names[, ..scenario_names])  # all scenario combinations
+
+# Create the full grid
+full_grid <- CJ(t = all_t, 
+                scenario = 1:nrow(all_scenarios), unique = TRUE)
+
+# Merge scenario columns back
+full_grid <- cbind(full_grid[, -"scenario", with = FALSE], all_scenarios[full_grid$scenario])
+
+## all_experiments: srmpulsemaskedterm rows, scenario columns only
+all_experiments <- unique(
+  sanitized_names[experiment == "srmpulsemaskedterm", ..scenario_names]
+)
+
+## pre-filter by experiment so we don't repeat this in the loop
+dt_srmpt   <- sanitized_names[experiment == "srmpulsemaskedterm"]
+dt_srmptm  <- sanitized_names[experiment == "srmpulsemasked"]
+dt_srmp    <- sanitized_names[experiment == "srmpulse"]
+dt_srm     <- sanitized_names[experiment == "srm"]
+dt_pulse   <- sanitized_names[experiment == "pulse"]
+dt_base    <- sanitized_names[experiment == "base"]
+
+## define column sets used as join keys
+k_all     <- scenario_names
+k_no_term <- setdiff(scenario_names, "term")
+k_pulse   <- setdiff(scenario_names, c("term", "cool_rate", "geo_start", "geo_end"))
+k_base    <- setdiff(scenario_names,
+                     c("term", "cool_rate", "geo_start", "geo_end", "gas", "pulse_time"))
+
+## set keys once for fast joins inside the loop
+setkeyv(dt_srmpt,   k_all)
+setkeyv(dt_srmptm,  k_no_term)
+setkeyv(dt_srmp,    k_no_term)
+setkeyv(dt_srm,     k_no_term)
+setkeyv(dt_pulse,   k_pulse)
+setkeyv(dt_base,    k_base)
+
+if(file.exists(file.path(output_folder, name_output))) { 
+  existing_output <- fread(file = file.path(output_folder, name_output))
+  existing_output <- unique(existing_output[,..scenario_names])
+  existing_output[, names(existing_output) := lapply(.SD, as.character)]
+  if (skip_scenarios == F) file.remove(file.path(output_folder, name_output))
+  } else {skip_scenarios <- F}
+
+for (n_chunk in seq(1,nrow(all_experiments), by = N+1 )) { 
+  
+  files_loop <- c()
+  
+  ## current experiment row
+  for (n_loop in seq(n_chunk,min(n_chunk+N,nrow(all_experiments))) ) {
+  
+  exp_row <- all_experiments[n_loop]
+  
+  if ( skip_scenarios==T) if (nrow(existing_output[exp_row, on = k_all, nomatch = 0L]) > 0 ) next 
+  
+  ## 1) srmpulsemaskedterm: match on all scenario columns
+  f1 <- dt_srmpt[exp_row, on = k_all, mult = "first"]$gdx
+  
+  ## 2–4) srmpulsemasked / srmpulse / srm: drop term
+  exp_no_term <- exp_row[, ..k_no_term]
+  
+  f2 <- dt_srmptm[exp_no_term, on = k_no_term, mult = "first"]$gdx
+  f3 <- dt_srmp[exp_no_term,   on = k_no_term, mult = "first"]$gdx
+  f4 <- dt_srm[exp_no_term,    on = k_no_term, mult = "first"]$gdx
+  
+  ## 5) pulse: drop term, cool_rate, geo_start, geo_end
+  exp_pulse <- exp_row[, ..k_pulse]
+  f5 <- dt_pulse[exp_pulse, on = k_pulse, mult = "first"]$gdx
+  
+  ## 6) base: drop term, cool_rate, geo_start, geo_end, gas, pulse_time
+  exp_base <- exp_row[, ..k_base]
+  f6 <- dt_base[exp_base, on = k_base, mult = "first"]$gdx
+  
+  files_loop_mini <- c(f1, f2, f3, f4, f5, f6)
+  
+  if (length(files_loop_mini) != 6 || any(is.na(files_loop_mini))) next else files_loop <- append(files_loop,files_loop_mini) 
+  
+  }
+
+if (length(files_loop) == 0) next     # skip loop iteration
+  
+files_loop <- unique(files_loop)
+
+cat("Loading the data for experiments", n_chunk, "to", n_chunk+N, "from a total of", nrow(all_experiments), "experiments...\n")
+
+# Batch extract using gdxtools, then join sanitized_names and sanitize
+TATM <- setDT(gdxtools::batch_extract("TATM", files = files_loop)$TATM)
+TATM <- merge(TATM, sanitized_names, by.x = "gdx", by.y = "gdx", all = FALSE)
+TATM <- sanitize_dt(TATM)
+
+W_EMI <- setDT(gdxtools::batch_extract("W_EMI", files = files_loop)$W_EMI)
+W_EMI <- merge(W_EMI, sanitized_names, by = "gdx", all = FALSE)
+W_EMI <- sanitize_dt(W_EMI)
+
+FORC <- setDT(gdxtools::batch_extract("FORCING", files = files_loop)$FORCING)
+FORC <- merge(FORC, sanitized_names, by = "gdx", all = FALSE)
+FORC <- sanitize_dt(FORC)
+
+CONC <- setDT(gdxtools::batch_extract("CONC", files = files_loop)$CONC)
+CONC <- merge(CONC, sanitized_names, by = "gdx", all = FALSE)
+CONC <- sanitize_dt(CONC)
+
+SRM <- setDT(gdxtools::batch_extract("SRM", files = files_loop)$SRM)
+SRM <- merge(SRM, sanitized_names, by = "gdx", all = FALSE)
+SRM <- sanitize_dt(SRM)
+
+background_srm <- setDT(gdxtools::batch_extract("forcing_srm", files = files_loop)$forcing_srm)
+background_srm <- merge(background_srm, sanitized_names, by = "gdx", all = FALSE)
+background_srm <- sanitize_dt(background_srm)
+
+# total forcing aggregation (equivalent to dplyr group_by + summarise)
+tot_forcing <- FORC[, .(value = sum(value)), by = c("t", "file",scenario_names, "experiment")]
 
 cat("Analyzing the data...")
+
 # build and aggregate for pre, post_noterm, post_term using above functions
 dt_noterm <- prepare_join_table("srmpulsemasked")
 dt_pre <- dt_noterm[ t >= as.numeric(pulse_time) & t <= as.numeric(term) ]
@@ -424,14 +465,17 @@ combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / puls
 # ----------------------------
 # Save final output (combined table)
 # ----------------------------
-name_output <- paste0("output_",paste0(res, collapse = "_"), ".csv")
-fwrite(combined_wide, file = file.path(output_folder, name_output))
+fwrite(combined_wide, file = file.path(output_folder, name_output), append = TRUE)
+
+}
+
 cat("Saved output to:", file.path(output_folder, name_output), "\n")
 
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 cat("This code run for exactly",time.taken, "seconds")
 
-sink(type = "message")
-sink()
-close(logfile)
+if(run_hpc==T) {
+  sink(type = "message")
+  sink()
+  close(logfile) }
