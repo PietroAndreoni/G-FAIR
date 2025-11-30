@@ -1,9 +1,10 @@
-
+library(tidyverse)
 damnpv <- bind_rows(lapply(list.files(output_folder, pattern = "\\.csv$", full.names = TRUE), read.csv)) %>% select(-X)
 
-damnpv <- read.csv("Results_output/output_analysis_dt.csv")
+damnpv <- bind_rows(lapply(paste0(output_folder, c("/output_3.csv","/output_4.csv")), read.csv))
 
-damnorm <- damnpv %>% select(-t) %>% 
+
+damnorm <- damnpv %>% unique() %>% 
   mutate(geo_start=ifelse(cool_rate==0,2500,geo_start),
          geo_end =ifelse(cool_rate==0,max(geo_end)+100,geo_end )) %>% 
   mutate_if(is.integer, as.numeric) %>%
@@ -16,8 +17,7 @@ damnorm <- damnpv %>% select(-t) %>%
 damnpv %>% 
   group_by(gas) %>% 
   summarise(npc_mad = mad(npc_srm,na.rm=TRUE), 
-            npc_med = median(npc_srm,na.rm=TRUE),
-            p99 = median(npc_srm,na.rm=TRUE))
+            npc_med = median(npc_srm,na.rm=TRUE))
          
 damnorm %>% 
   ggplot() + geom_qq(aes(sample=npc_std,color=gas)) +
@@ -45,7 +45,7 @@ adjust_opt <- 1.06 * sd(damnorm$npc_norm)*(length(damnorm$npc_norm))^(-1/5)
 density_plot <- ggplot(damnorm) +
   geom_density(aes(x=npc_norm,
                    color=gas),
-               adjust=adjust_opt,
+               adjust=25,
                linewidth=1) +
 geom_point(aes(x=npc_norm,
                color=gas,
@@ -74,7 +74,7 @@ library(gsaot)
 gsoat_data <- damnorm %>% filter(gas=="ch4") %>% ungroup()
 
 stat_analysis_ch4 <- ot_indices_1d(gsoat_data %>% 
-                                     select(-gas,-pulse_size,-costnpv,-damnpv,-scc,-npc_srm, -npc_norm),
+                                     select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-scc,-scc_nosrm,-npc_std,-npc_srm, -npc_norm),
                                    gsoat_data %>% pull(npc_srm), 
                                    M= 15,
                                    boot = T,
@@ -84,18 +84,29 @@ lowerbound_ch4 <- irrelevance_threshold(gsoat_data %>% pull(npc_srm), M= 15, sol
 gsoat_data <- damnorm %>% filter(gas=="co2") %>% ungroup()
 
 stat_analysis_co2 <- ot_indices_1d(gsoat_data %>% 
-                                     select(-gas,-pulse_size,-costnpv,-damnpv,-scc,-npc_srm, -npc_norm),
+                                     select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-scc,-scc_nosrm,-npc_std,-npc_srm, -npc_norm),
                                    gsoat_data %>% pull(npc_srm), 
                                    M= 15,
                                    boot = T,
                                    R = 100)
 lowerbound_co2 <- irrelevance_threshold(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
 
-input_categories <- c("Climate","Climate","Socio-economic","Socio-economic","background SAI",
-                      "background SAI","background SAI","Impacts","Normative","Impacts","Normative",
-                      "Socio-economic","Normative","Impacts","Normative",
-                      "Impacts")
-names(input_categories) <- stat_analysis_ch4$indices_ci$input
+input_categories <- c("ecs"="Climate",
+                      "tcr"="Climate",
+                      "rcp"="Socio-economic",
+                      "pulse_time"="Socio-economic",
+                      "geo_start"="background SAI",
+                      "geo_end"="background SAI",
+                      "cool_rate"="background SAI",
+                      "alpha"="Impacts",
+                      "delta"="Normative",
+                      "theta"="Impacts",
+                      "prob"="Normative",
+                      "dg"="Socio-economic",
+                      "term"="Normative",
+                      "mortality_ozone"="Impacts",
+                      "mortality_sai"="Normative",
+                      "mortality_ozone"="Impacts")
 
 importance_ch4 <- ggplot(as_tibble(stat_analysis_ch4$indices_ci)  ) + 
   geom_bar(aes(x=reorder(input, -original),
