@@ -20,7 +20,7 @@ if (packageVersion("witchtools") < "0.4.0") {
 library(witchtools)
 
 # Packages
-pkgs <- c('data.table','stringr','EnvStats')
+pkgs <- c('data.table','stringr','docopt')
 res <- lapply(pkgs, require_package)
 require_gdxtools()
 
@@ -181,7 +181,6 @@ Options:
 --seed <seed>         seed number (for reproducibility)
 ' -> doc
 
-library(docopt)
 opts <- docopt(doc, version = 'Montecarlo')
 
 res <- ifelse(is.null(opts[["i"]]), "Results_montecarlo-Results_montecarlo_2-Results_montecarlo_3", as.character(opts["i"]) )
@@ -193,6 +192,10 @@ output_folder <- ifelse(is.null(opts[["o"]]), "Results_output", as.character(opt
 if (!dir.exists(output_folder)) {
   dir.create(output_folder)
 }
+
+logfile <- file(file.path(output_folder,"r_console.log"), open = "wt")
+sink(logfile)
+sink(logfile, type = "message")  # capture warnings/errors too
 
 if (any(!dir.exists(res)) ) stop("some of the folder specified do not exsist")
 
@@ -421,9 +424,14 @@ combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / puls
 # ----------------------------
 # Save final output (combined table)
 # ----------------------------
-fwrite(combined_wide, file = file.path(output_folder, "output_analysis_dt.csv"))
-cat("Saved output to:", file.path(output_folder, "output_analysis_dt.csv"), "\n")
+name_output <- paste0("output_",paste0(res, collapse = "_"), ".csv")
+fwrite(combined_wide, file = file.path(output_folder, name_output))
+cat("Saved output to:", file.path(output_folder, name_output), "\n")
 
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 cat("This code run for exactly",time.taken, "seconds")
+
+sink(type = "message")
+sink()
+close(logfile)
