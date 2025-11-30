@@ -248,7 +248,7 @@ id_montecarlo[, rcp := str_remove(rcp, "RCP")]
 setnames(id_montecarlo, c("pulse","cool","term_delta","start","term"), c("pulse_time","cool_rate","term","geo_start","geo_end"))
 id_montecarlo <- unique(id_montecarlo)
 
-cat("Proucing montecarlo realizations...")
+cat("Proucing montecarlo realizations... \n")
 n_scenarios <- nrow(id_montecarlo)
 set.seed(seed)
 # add uncertainties
@@ -270,16 +270,6 @@ scenario_names <- setdiff(names(sanitized_names), c("gdx","file","experiment"))
 pulse_scenarios <- setdiff(scenario_names, c("cool_rate","geo_end","geo_start","term"))
 base_scenarios <- setdiff(pulse_scenarios, c("gas","pulse_time"))
 
-# create full grid to handle missing data
-all_t <- seq(1,480)  # or tot_forcing$t
-all_scenarios <- unique(sanitized_names[, ..scenario_names])  # all scenario combinations
-
-# Create the full grid
-full_grid <- CJ(t = all_t, 
-                scenario = 1:nrow(all_scenarios), unique = TRUE)
-
-# Merge scenario columns back
-full_grid <- cbind(full_grid[, -"scenario", with = FALSE], all_scenarios[full_grid$scenario])
 
 ## all_experiments: srmpulsemaskedterm rows, scenario columns only
 all_experiments <- unique(
@@ -357,6 +347,17 @@ files_loop <- unique(files_loop)
 
 cat("Loading the data for experiments", n_chunk, "to", n_chunk+N, "from a total of", nrow(all_experiments), "experiments...\n")
 
+# create full grid to handle missing data
+all_t <- seq(1,480)  # or tot_forcing$t
+all_scenarios <- unique(sanitized_names[gdx %in% files_loop, ..scenario_names])  # all scenario combinations
+
+# Create the full grid
+full_grid <- CJ(t = all_t, 
+                scenario = 1:nrow(all_scenarios), unique = TRUE)
+
+# Merge scenario columns back
+full_grid <- cbind(full_grid[, -"scenario", with = FALSE], all_scenarios[full_grid$scenario])
+
 # Batch extract using gdxtools, then join sanitized_names and sanitize
 TATM <- setDT(gdxtools::batch_extract("TATM", files = files_loop)$TATM)
 TATM <- merge(TATM, sanitized_names, by.x = "gdx", by.y = "gdx", all = FALSE)
@@ -385,7 +386,7 @@ background_srm <- sanitize_dt(background_srm)
 # total forcing aggregation (equivalent to dplyr group_by + summarise)
 tot_forcing <- FORC[, .(value = sum(value)), by = c("t", "file",scenario_names, "experiment")]
 
-cat("Analyzing the data...")
+cat("Analyzing the data... \n")
 
 # build and aggregate for pre, post_noterm, post_term using above functions
 dt_noterm <- prepare_join_table("srmpulsemasked")
