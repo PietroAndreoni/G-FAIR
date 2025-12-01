@@ -72,11 +72,11 @@ compute_gwpt <- function(DT, gwp_col = "gwp", dg_col = "dg", t_col = "t") {
 npv_aggregator <- function(DT, keep_names = all_names) {
   DT = copy(DT)
   compute_gwpt(DT)
-  DT[, dam := gwp * (alpha * (pmax(0,temp)^2 - pmax(0,temp_srm)^2))]
+  DT[, dam := gwpt * (alpha * (pmax(0,temp)^2 - pmax(0,temp_srm)^2))]
   DT[, direct_cost := srm_masking * forctoUSD]
   DT[, srm_pollution := vsl * (gwpt/gwp) * srm_masking * forctoTg * mortality_srm]
   DT[, tropoz_pollution := vsl * (gwpt/gwp) * mortality_ozone * (concch4_pulse - concch4_base)]
-  DT[, imperfect_masking := 2 * gwp * alpha * pmax(0,temp_base) * (1 - cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1 + srm/forc)]
+  DT[, imperfect_masking := 2 * gwpt * alpha * pmax(0,temp_base) * (1 - cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1 + srm/forc)]
   # aggregator
   res <- DT[, .(
     dirnpv = sum(direct_cost / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE),
@@ -422,7 +422,7 @@ scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm"), wit
 scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * (gwpt/gwp) * mortality_ozone * (concch4_pulse - concch4_base)]
-scc[, dam := gwp * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
+scc[, dam := gwpt * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
 scc_agg <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = setdiff(all_names, c("gas","theta","term","prob","mortality_srm"))]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
 scc_agg[, scc := damnpv / pulse_size]
@@ -441,7 +441,7 @@ scc <- merge(scc, id_montecarlo[, c("ecs","tcr","rcp","pulse_time","alpha","delt
 scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * (gwpt/gwp) * mortality_ozone * (concch4_pulse - concch4_base)]
-scc[, dam := gwp * ( alpha * (pmax(0,temp_pulse)^2 - pmax(0,temp_base)^2) )]
+scc[, dam := gwpt * ( alpha * (pmax(0,temp_pulse)^2 - pmax(0,temp_base)^2) )]
 scc_agg2 <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = intersect(names(scc), names(id_montecarlo))]
 scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time","pulse_size"), with = FALSE], by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
 scc_agg2[, scc_nosrm := damnpv / pulse_size]
