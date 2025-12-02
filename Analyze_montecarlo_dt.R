@@ -63,10 +63,10 @@ replace_num_na0 <- function(DT) {
 }
 
 # vectorized gwpt computation
-compute_gwpt <- function(DT, gwp_col = "gwp", dg_col = "dg", t_col = "t") {
+compute_gwpt <- function(DT, dg_col = "dg", t_col = "t", gwp_max = 20) {
   # gwpt = pmin(gwp * (1+dg)^(280-1), gwp * (1+dg)^(t-1))
-  DT[, gwpt := pmin(get(gwp_col) * (1 + get(dg_col))^(280-1),
-                    get(gwp_col) * (1 + get(dg_col))^(get(t_col)-1))]
+  DT[, gwpt := pmin(gwp * gwp_max,
+                    gwp * (1 + get(dg_col))^(get(t_col)-1))]
 }
 
 npv_aggregator <- function(DT, keep_names = all_names) {
