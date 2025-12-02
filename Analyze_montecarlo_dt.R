@@ -254,7 +254,7 @@ set.seed(seed)
 # add uncertainties
 id_montecarlo[, theta := round(drawln(15,7,n_scenarios),0)]
 id_montecarlo[, alpha := round(drawln(0.00575,0.00575*150/(230-100),n_scenarios),5)]
-id_montecarlo[, delta := round(runif(n_scenarios,0.001,0.07),3)]
+id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),3)]
 id_montecarlo[, prob := round(runif(n_scenarios,0,1),2)]
 id_montecarlo[, mortality_srm := round( pmax(0,drawln(7400,(16000-2300)/1.96,n_scenarios),0) ) ]
 id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.08,0.2),2)]
