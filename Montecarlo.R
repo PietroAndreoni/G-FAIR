@@ -103,10 +103,10 @@ max_id <- nrow(data)
 
 for (i in seq(1,n_scenarios,by=1)) {
 # climate equilibrium sensitivity
-  ecs <- round(drawln(3.14,2)*10,0)
+  ecs <- round(drawln(3.14,2/1.96)*10,0)
 
 # tcr
-  tcr <- round(drawln(1.85,0.8)*10,0)
+  tcr <- round(drawln(1.85,0.8/1.96)*10,0)
 
 # rcp
   rcp <- sample(c("RCP3PD","RCP45","RCP6","RCP85"),1)

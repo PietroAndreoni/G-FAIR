@@ -253,9 +253,9 @@ n_scenarios <- nrow(id_montecarlo)
 set.seed(seed)
 # add uncertainties
 id_montecarlo[, theta := round(drawln(15,7,n_scenarios),0)]
-id_montecarlo[, alpha := round(drawln(0.00575,0.00575*150/(230-100),n_scenarios),5)]
-id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),3)]
-id_montecarlo[, prob := round(runif(n_scenarios,0,1),2)]
+id_montecarlo[, alpha := round(drawln(0.00575,0.00575*150/(230-100),n_scenarios),4)]
+id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),2)]
+id_montecarlo[, prob := round(runif(n_scenarios,0,1),1)]
 id_montecarlo[, mortality_srm := round( pmax(0,drawln(7400,(16000-2300)/1.96,n_scenarios),0) ) ]
 id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.08,0.2),2)]
 # from https://pmc.ncbi.nlm.nih.gov/articles/instance/10631284/bin/NIHMS1940316-supplement-SI.pdf 
@@ -263,7 +263,7 @@ id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.08,0.2),2)]
 id_montecarlo[, mortality_ozone := round( pmax(0,rnorm(n_scenarios,11250,(17500-5000)/1.645) / 100, 0) ) ]
 id_montecarlo[, vsl := round(runif(n_scenarios,1,10),0) * 1e6]
 id_montecarlo[, vsl_eta := round(runif(n_scenarios,0.4,1),1) ]
-id_montecarlo[, dg := round(rnorm(n_scenarios,mean=0.015,sd=0.005),4)]
+id_montecarlo[, dg := round(rnorm(n_scenarios,mean=0.015,sd=0.005),3)]
 
 all_names <- c("gas", names(id_montecarlo))
 
@@ -425,9 +425,11 @@ scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
-scc_agg <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = setdiff(all_names, c("gas","theta","term","prob","mortality_srm","forctoTg"))]
+scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)),na.rm = TRUE),
+                    ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), 
+                by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
-scc_agg[, scc := damnpv / pulse_size]
+scc_agg[, scc := (damnpv + ozpnpv) / pulse_size]
 scc_agg[, c("damnpv","pulse_size") := NULL ]
 
 # scc calculation (w/o SRM)
@@ -444,9 +446,11 @@ scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_pulse)^2 - pmax(0,temp_base)^2) )]
-scc_agg2 <- scc[, .(damnpv = sum( (dam + tropoz_pollution) / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), by = intersect(names(scc), names(id_montecarlo))]
+scc_agg2 <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)),na.rm = TRUE),
+                    ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), 
+                by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
 scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time","pulse_size"), with = FALSE], by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
-scc_agg2[, scc_nosrm := damnpv / pulse_size]
+scc_agg2[, scc_nosrm := (damnpv + ozpnpv) / pulse_size]
 scc_agg2[, c("damnpv","pulse_size") := NULL ]
 
 # combine results
