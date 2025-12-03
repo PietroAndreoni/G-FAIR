@@ -3,7 +3,6 @@ install_witchtools <- function(){
     install.packages("remotes", repos="http://cloud.r-project.org")
   remotes::install_github("witch-team/witchtools")
 }
-
 if (!"witchtools" %in% rownames(installed.packages())) {
   install_witchtools()
   if (!requireNamespace("witchtools")) stop("Package witchtools not found")
@@ -63,10 +62,14 @@ replace_num_na0 <- function(DT) {
 }
 
 # vectorized gwpt computation
-compute_gwpt <- function(DT, dg_col = "dg", t_col = "t", gwp_max = 20) {
+compute_gwpt <- function(DT, dg_col = "dg", t_col = "t", gwp_max = 15) {
   # gwpt = pmin(gwp * (1+dg)^(280-1), gwp * (1+dg)^(t-1))
-  DT[, gwpt := pmin(gwp * gwp_max,
-                    gwp * (1 + get(dg_col))^(get(t_col)-1))]
+  DT[t <= 80, gwpt := pmin(gwp * gwp_max,
+                    gwp * (1 + dg)^(t-1))]
+  DT[t > 80 & t <= 180, gwpt := pmin(gwp * gwp_max,
+                  gwp * (1 + dg)^(80-1) * (1 + dg/2)^(t-80))]
+  DT[t > 180, gwpt := pmin(gwp * gwp_max,
+                           gwp * (1 + dg)^(80-1) * (1 + dg/2)^(180-80) * (1 + dg/4)^(t-180))]
 }
 
 npv_aggregator <- function(DT, keep_names = all_names) {
@@ -94,19 +97,244 @@ npv_aggregator <- function(DT, keep_names = all_names) {
   return(res_long)
 }
 
-drawln <- function(median,std,n=1,plot=F) {
-  location <- log(median)#log(m^2 / sqrt(s^2 + m^2))
-  y <- (1 + sqrt(1 + 4 * (std^2 / median^2))) / 2
-  shape <- sqrt(log(y))
-  if (plot==T) {
-    draws <- rlnorm(n = 10000, location, shape)
-    print(paste("mean: ",round(mean(draws),5) ) )
-    print(paste("median: ",round(median(draws), 5) ) )
-    print(paste("std: ",round(sd(draws), 5) ) )
-    plot(density(draws[draws > 0 & draws < 10*std])) }
+fit_distribution <- function(distribution = "lognormal",
+                                       n =1, #number of required realizations
+                                       median = NULL,
+                                       mean   = NULL,
+                                       sd     = NULL,
+                                       q33    = NULL,
+                                       q66    = NULL,
+                                       q5     = NULL,
+                                       q95    = NULL,
+                                       probs_33_66 = c(0.33, 0.66),
+                                       probs_5_95  = c(0.05, 0.95),
+                                       plot=F) {
+
+  mu    <- NA_real_
+  sigma <- NA_real_
   
-  return(rlnorm(n, location, shape))
+  if (distribution == "lognormal") {
+    # Helper to check positivity (lognormal only makes sense for > 0)
+    check_pos <- function(x, name) {
+      if (!is.null(x) && any(x <= 0)) {
+        stop(name, " must be > 0 for a lognormal distribution.")
+      }
+    }
+    
+    check_pos(median, "median")
+    check_pos(mean,   "mean")
+    check_pos(sd,     "sd")
+    check_pos(q33,    "q33")
+    check_pos(q66,    "q66")
+    check_pos(q5,     "q5")
+    check_pos(q95,    "q95")
+    
+    ## 1) Case: mean and sd of X
+    if (!is.null(mean) && !is.null(sd)) {
+      if (sd <= 0) stop("sd must be > 0.")
+      v      <- sd^2
+      sigma2 <- log(1 + v / mean^2)
+      if (sigma2 <= 0) stop("Inconsistent mean and sd for a lognormal.")
+      sigma  <- sqrt(sigma2)
+      mu     <- log(mean) - 0.5 * sigma2
+      
+      ## 2) Case: mean and median of X
+    } else if (!is.null(mean) && !is.null(median)) {
+      mu     <- log(median)
+      sigma2 <- 2 * (log(mean) - mu)
+      if (sigma2 <= 0) stop("Inconsistent mean and median for a lognormal.")
+      sigma  <- sqrt(sigma2)
+      
+      ## 3) NEW: median and sd of X
+    } else if (!is.null(median) && !is.null(sd)) {
+      if (sd <= 0) stop("sd must be > 0.")
+      mu <- log(median)
+      v  <- sd^2
+      
+      # For a lognormal:
+      # var = (exp(sigma^2) - 1) * exp(2*mu + sigma^2)
+      # Let t = exp(sigma^2); then var = (t - 1) * t * exp(2*mu)
+      # => (t^2 - t) = var / exp(2*mu)
+      # Solve t^2 - t - A = 0, where A = var / median^2
+      A    <- v / median^2
+      disc <- 1 + 4 * A
+      t    <- (1 + sqrt(disc)) / 2   # positive root
+      sigma2 <- log(t)
+      if (sigma2 <= 0) stop("Inconsistent median and sd for a lognormal.")
+      sigma  <- sqrt(sigma2)
+      
+      ## 4) Case: median and 33–66% quantiles
+    } else if (!is.null(median) && !is.null(q33) && !is.null(q66)) {
+      mu <- log(median)
+      p1 <- probs_33_66[1]
+      p2 <- probs_33_66[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      sigma_33 <- (log(q33) - mu) / z1
+      sigma_66 <- (log(q66) - mu) / z2
+      sigma    <- mean(c(sigma_33, sigma_66))
+      
+      ## 5) Case: median and 5–95% quantiles
+    } else if (!is.null(median) && !is.null(q5) && !is.null(q95)) {
+      mu <- log(median)
+      p1 <- probs_5_95[1]
+      p2 <- probs_5_95[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      sigma_5  <- (log(q5)  - mu) / z1
+      sigma_95 <- (log(q95) - mu) / z2
+      sigma    <- mean(c(sigma_5, sigma_95))
+      
+      ## 6) Case: 33–66% quantiles only
+    } else if (!is.null(q33) && !is.null(q66)) {
+      p1 <- probs_33_66[1]
+      p2 <- probs_33_66[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      
+      L1 <- log(q33)
+      L2 <- log(q66)
+      
+      sigma <- (L2 - L1) / (z2 - z1)
+      mu    <- L1 - sigma * z1
+      
+      ## 7) Case: 5–95% quantiles only
+    } else if (!is.null(q5) && !is.null(q95)) {
+      p1 <- probs_5_95[1]
+      p2 <- probs_5_95[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      
+      L1 <- log(q5)
+      L2 <- log(q95)
+      
+      sigma <- (L2 - L1) / (z2 - z1)
+      mu    <- L1 - sigma * z1
+      
+    } else {
+      stop("Not enough information for lognormal. Provide one of:
+      (mean & sd),
+      (mean & median),
+      (median & sd),
+      (median & q33 & q66),
+      (median & q5 & q95),
+      (q33 & q66), or
+      (q5 & q95).")
+    }
+    
+    # Implied stats for lognormal X
+    out_mean   <- exp(mu + 0.5 * sigma^2)
+    out_median <- exp(mu)
+    out_sd     <- sqrt((exp(sigma^2) - 1) * exp(2 * mu + sigma^2))
+
+    
+    if (plot==T) {
+      draws <- rlnorm(n = 10000, mu, sigma)
+      print(paste("mean: ",round(mean(draws),5) ) )
+      print(paste("median: ",round(median(draws), 5) ) )
+      print(paste("std: ",round(sd(draws), 5) ) )
+      print(paste("66%: ",round(quantile(draws,0.66), 5) ) )
+      print(paste("33%: ",round(quantile(draws,0.33), 5) ) )
+      print(paste("95%: ",round(quantile(draws,0.95), 5) ) )
+      print(paste("5%: ",round(quantile(draws,0.05), 5) ) )
+      plot(density(draws[draws > 0 & draws < 10*sd(draws)])) }
+    
+    return(rlnorm(n, mu, sigma)) 
+    
+    
+  } else if (distribution == "normal") {
+    
+    if (!is.null(sd) && sd <= 0) stop("sd must be > 0.")
+    
+    ## 1) mean & sd
+    if (!is.null(mean) && !is.null(sd)) {
+      mu    <- mean
+      sigma <- sd
+      
+      ## 2) median & sd
+    } else if (!is.null(median) && !is.null(sd)) {
+      mu    <- median
+      sigma <- sd
+      
+      ## 3) median and 33–66% quantiles
+    } else if (!is.null(median) && !is.null(q33) && !is.null(q66)) {
+      mu <- median
+      p1 <- probs_33_66[1]
+      p2 <- probs_33_66[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      
+      sigma_33 <- (q33 - mu) / z1
+      sigma_66 <- (q66 - mu) / z2
+      sigma    <- mean(c(sigma_33, sigma_66))
+      
+      ## 4) median and 5–95% quantiles
+    } else if (!is.null(median) && !is.null(q5) && !is.null(q95)) {
+      mu <- median
+      p1 <- probs_5_95[1]
+      p2 <- probs_5_95[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      
+      sigma_5  <- (q5  - mu) / z1
+      sigma_95 <- (q95 - mu) / z2
+      sigma    <- mean(c(sigma_5, sigma_95))
+      
+      ## 5) 33–66% quantiles only
+    } else if (!is.null(q33) && !is.null(q66)) {
+      p1 <- probs_33_66[1]
+      p2 <- probs_33_66[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      
+      sigma <- (q66 - q33) / (z2 - z1)
+      mu    <- q33 - sigma * z1
+      
+      ## 6) 5–95% quantiles only
+    } else if (!is.null(q5) && !is.null(q95)) {
+      p1 <- probs_5_95[1]
+      p2 <- probs_5_95[2]
+      z1 <- qnorm(p1)
+      z2 <- qnorm(p2)
+      
+      sigma <- (q95 - q5) / (z2 - z1)
+      mu    <- q5 - sigma * z1
+      
+    }  else {
+        stop("Not enough information for lognormal. Provide one of:
+      (mean & sd),
+      (mean & median),
+      (median & sd),
+      (median & q33 & q66),
+      (median & q5 & q95),
+      (q33 & q66), or
+      (q5 & q95).")
+      }
+    
+    # Return also some implied summary stats for convenience
+    out_mean <- exp(mu + 0.5 * sigma^2)
+    out_median <- exp(mu)
+    out_sd <- sqrt((exp(sigma^2) - 1) * exp(2 * mu + sigma^2))
+    
+    
+    if (plot==T) {
+      draws <- rnorm(n = 10000, mu, sigma)
+      print(paste("mean: ",round(mean(draws),5) ) )
+      print(paste("median: ",round(median(draws), 5) ) )
+      print(paste("std: ",round(sd(draws), 5) ) )
+      print(paste("66%: ",round(quantile(draws,0.66), 5) ) )
+      print(paste("33%: ",round(quantile(draws,0.33), 5) ) )
+      print(paste("95%: ",round(quantile(draws,0.95), 5) ) )
+      print(paste("5%: ",round(quantile(draws,0.05), 5) ) )
+      plot(density(draws[draws > 0 & draws < 10*sd(draws)])) }
+    
+    return(rnorm(n, mu, sigma)) 
+    
+    
+    }  else {stop("choose normal or lognormal distribution")}
+      
 }
+    
 
 prepare_join_table <- function(filter_experiment, include_term = TRUE) {
   
@@ -252,18 +480,18 @@ cat("Proucing montecarlo realizations... \n")
 n_scenarios <- nrow(id_montecarlo)
 set.seed(seed)
 # add uncertainties
-id_montecarlo[, theta := round(drawln(15,7,n_scenarios),0)]
-id_montecarlo[, alpha := round(drawln(0.00575,0.00575*150/(230-100),n_scenarios),4)]
+id_montecarlo[, theta := round(fit_distribution(median=15,q5=5,q95=35,n=n_scenarios),0)]
+id_montecarlo[, alpha := round(fit_distribution(median=0.00575,sd=0.00575*382/179,n=n_scenarios),4)]
 id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),2)]
 id_montecarlo[, prob := round(runif(n_scenarios,0,1),1)]
-id_montecarlo[, mortality_srm := round( pmax(0,drawln(7400,(16000-2300)/1.96,n_scenarios),0) ) ]
+id_montecarlo[, mortality_srm := round( pmax(0,fit_distribution(median=7400,q5=2300,q95=16000,n=n_scenarios),0) ) ]
 id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.08,0.2),2)]
 # from https://pmc.ncbi.nlm.nih.gov/articles/instance/10631284/bin/NIHMS1940316-supplement-SI.pdf 
 # mortality / 100 ppb pulse of methane 
-id_montecarlo[, mortality_ozone := round( pmax(0,rnorm(n_scenarios,11250,(17500-5000)/1.645) / 100, 0) ) ]
+id_montecarlo[, mortality_ozone := round( pmax(0, fit_distribution(distribution="normal",median=11250,q5=5000,q95=17500,n=n_scenarios) / 100, 0) ) ]
 id_montecarlo[, vsl := round(runif(n_scenarios,1,10),0) * 1e6]
 id_montecarlo[, vsl_eta := round(runif(n_scenarios,0.4,1),1) ]
-id_montecarlo[, dg := round(rnorm(n_scenarios,mean=0.015,sd=0.005),3)]
+id_montecarlo[, dg := round(fit_distribution(distribution="normal",median=0.015,sd=0.005,n=n_scenarios),3)]
 
 all_names <- c("gas", names(id_montecarlo))
 
