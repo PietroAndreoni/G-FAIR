@@ -533,7 +533,10 @@ if(file.exists(file.path(output_folder, name_output))) {
   existing_output <- fread(file = file.path(output_folder, name_output))
   existing_output <- unique(existing_output[,..scenario_names])
   existing_output[, names(existing_output) := lapply(.SD, as.character)]
-  if (skip_scenarios == F) file.remove(file.path(output_folder, name_output))
+  if (skip_scenarios == F) {
+    file.remove(file.path(output_folder, name_output))
+    file.remove(file.path(output_folder, paste0("scc_",name_output)) ) 
+    file.remove(file.path(output_folder, paste0("sccnosrm_",name_output)) ) }
   } else {skip_scenarios <- F}
 
 cat("End data preprocessing...\n")
@@ -658,7 +661,7 @@ scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)),
                 by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
 scc_agg[, scc := (damnpv + ozpnpv) / pulse_size]
-scc_agg[, c("damnpv","pulse_size") := NULL ]
+scc_agg <- unique(scc_agg)
 
 # scc calculation (w/o SRM)
 scc <- merge(
@@ -679,7 +682,7 @@ scc_agg2 <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))
                 by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
 scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time","pulse_size"), with = FALSE], by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
 scc_agg2[, scc_nosrm := (damnpv + ozpnpv) / pulse_size]
-scc_agg2[, c("damnpv","pulse_size") := NULL ]
+scc_agg2 <- unique(scc_agg2)
 
 # combine results
 combined <- merge(res_pre[, c(all_names,"source" ,"cost"), with = FALSE], res_post_noterm[, c(all_names,"source" ,"cost"), with = FALSE], by = c(all_names,"source"), all = TRUE, suffixes = c("_pre","_postnoterm"))
@@ -695,14 +698,14 @@ combined_wide <- dcast(
   value.var = "cost"
 )
 combined_wide <- merge(combined_wide, unique(pulse_size), by = intersect(names(combined_wide), names(pulse_size)), all.x = TRUE)
-combined_wide <- merge(combined_wide, unique(scc_agg), by = intersect(names(combined_wide), names(scc_agg)), all.x = TRUE)
-combined_wide <- merge(combined_wide, unique(scc_agg2), by = intersect(names(combined_wide), names(scc_agg2)), all.x = TRUE)
 combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / pulse_size]
 
 # ----------------------------
 # Save final output (combined table)
 # ----------------------------
 fwrite(combined_wide, file = file.path(output_folder, name_output), append = TRUE)
+fwrite(scc_agg, file = file.path(output_folder, paste0("scc_",name_output)), append = TRUE)
+fwrite(scc_agg2, file = file.path(output_folder, paste0("sccnosrm_",name_output)), append = TRUE)
 
 }
 
