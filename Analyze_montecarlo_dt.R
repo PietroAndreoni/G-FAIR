@@ -400,15 +400,16 @@ prepare_join_table <- function(filter_experiment, include_term = TRUE) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] 
+  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] []--base <main_scenario>]
 
 Options:
--i <res>              Path where the results are (default: Results_montecarlo). For multiple folders separate with -
--o <output_folder>    Where to save results
---hpc <run_hpc>       T/F if running from Juno (T) or local (F) 
---seed <seed>         seed number (for reproducibility)
---chunk <chunk>       how many scenarios to run together
---skip <skip>         skip or rerun existing scenarios
+-i <res>               Path where the results are (default: Results_montecarlo). For multiple folders separate with -
+-o <output_folder>     Where to save results
+--hpc <run_hpc>        T/F if running from Juno (T) or local (F) 
+--seed <seed>          seed number (for reproducibility)
+--chunk <chunk>        how many scenarios to run together
+--skip <skip>          skip or rerun existing scenarios
+--base <main_scenario> T/F to run the base scenario      
 ' -> doc
 
 opts <- docopt(doc, version = 'Montecarlo')
@@ -418,7 +419,7 @@ res <- str_split(res,"-")[[1]]
 
 output_folder <- ifelse(is.null(opts[["o"]]), "Results_output_trynew", as.character(opts["o"]) )
 
-name_output <- paste0("output_", tolower(gsub("[aeiouAEIOU_]", "", paste0(res, collapse = "_"))), ".csv")
+name_output <- paste0(tolower(gsub("[aeiouAEIOU_]", "", paste0(res, collapse = "_"))), ".csv")
 
 
 # Make sure the output folder exists (create it if not)
@@ -432,6 +433,7 @@ run_hpc = ifelse(is.null(opts[["hpc"]]), T, as.logical(opts["hpc"]) )
 seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 N = ifelse(is.null(opts[["chunk"]]), 100, as.integer(opts["chunk"]) )
 skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) ) 
+main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
 
 if(run_hpc==F) {igdx()} else {
   igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")
@@ -492,6 +494,12 @@ id_montecarlo[, mortality_ozone := round( pmax(0, fit_distribution(distribution=
 id_montecarlo[, vsl := round(runif(n_scenarios,1,10),0) * 1e6]
 id_montecarlo[, vsl_eta := round(runif(n_scenarios,0.4,1),1) ]
 id_montecarlo[, dg := round(fit_distribution(distribution="normal",median=0.015,sd=0.005,n=n_scenarios),3)]
+
+if (main_scenario == T) {
+  id_montecarlo[, vsl := 10 * 1e6]
+  id_montecarlo[, delta := 0.02]
+  id_montecarlo[, vsl_eta := 1 ]
+}
 
 all_names <- c("gas", names(id_montecarlo))
 

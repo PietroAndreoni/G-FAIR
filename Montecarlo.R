@@ -8,22 +8,23 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--seed <seed>] 
+  Montecarlo.R [-g <generate_data>] [-o <res>] [-q <which_queue>] [-n <n_scenarios>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-r <run_scenarios>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--seed <seed>] [--base <main_scenario>] 
 
 Options:
--o <res>              Path where the results are (default: Results)
--n <n_scenarios>      Number of new scenarios to generate
--g <generate_data>    T/F to generate new realizations
--w <overwrite_data>   T/F to overwrite old realizations
--r <run_scenarios>    T/F to run or just generate scenarios (in .sh script)
--p <run_parallel>     T/F if to run in parallel or in series (for Juno)
--s <start_job>        Number of line to start calling the scenarios 
--e <end_job>          End of line to start calling the scenarios
--q <which_queue>      Select queue to send the jobs to (for parallel solving)
--m <max_scenarios>    Maximum scenarios to send to solve
--x <rerun_problem>    T to avoid rerunning problematic scenarios (default)
---seed <seed>         seed number (for reproducibility)
---hpc <run_hpc>       T/F if to run on Juno or local (windows)
+-o <res>                     Path where the results are (default: Results)
+-n <n_scenarios>             Number of new scenarios to generate
+-g <generate_data>           T/F to generate new realizations
+-w <overwrite_data>          T/F to overwrite old realizations
+-r <run_scenarios>           T/F to run or just generate scenarios (in .sh script)
+-p <run_parallel>            T/F if to run in parallel or in series (for Juno)
+-s <start_job>               Number of line to start calling the scenarios 
+-e <end_job>                 End of line to start calling the scenarios
+-q <which_queue>             Select queue to send the jobs to (for parallel solving)
+-m <max_scenarios>           Maximum scenarios to send to solve
+-x <rerun_problem>           T to avoid rerunning problematic scenarios (default)
+--seed <seed>                seed number (for reproducibility)
+--hpc <run_hpc>              T/F if to run on Juno or local (windows)
+--base <main_scenario>       T/F if to run the main scenario only (no montecarlo over policy parameters)
 ' -> doc
 
 library(docopt)
@@ -268,12 +269,13 @@ fit_distribution <- function(distribution = "lognormal",
 }
 
 # logical
-generate_data = ifelse(is.null(opts[["g"]]), T, as.logical(opts["g"]) )
-overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
+generate_data = ifelse(is.null(opts[["g"]]), F, as.logical(opts["g"]) )
+overwrite_data = ifelse(is.null(opts[["w"]]), F, as.logical(opts["w"]) )
 run_scenarios = ifelse(is.null(opts[["r"]]), T, as.logical(opts["r"]) )
 run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
 run_hpc = ifelse(is.null(opts[["hpc"]]), F, as.logical(opts["hpc"]) )
 rerun_problem = ifelse(is.null(opts[["x"]]),T, as.logical(opts["x"]) )
+main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
 
 # numeric
 n_scenarios = ifelse(is.null(opts[["n"]]), 5, as.numeric(opts["n"]) )
@@ -350,7 +352,6 @@ for (i in seq(1,n_scenarios,by=1)) {
 # time of termination event 
   time_term <- sample(seq(10,500,by=10),1)
   
-  
   data <- data %>% 
     bind_rows(data.frame(ID=i+max_id,
                        ecs=ecs,
@@ -368,6 +369,10 @@ data <- data %>%
          start=ifelse(cool==0,2700,start) ) %>% 
   unique()
 
+if (main_scenario==T) {
+  data <- data %>% 
+    mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=5 ) }
+
 write.csv(data,file=paste0(res,"/id_montecarlo.csv")) } else {
   
 data <- as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"))) %>% select(-X)
@@ -379,7 +384,10 @@ cat("Launching jobs... \n")
 
 filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 
-for (gas in c("ch4","co2")) {
+gases <- c("ch4","co2")
+if(main_scenario==T) gases <- c("ch4") 
+
+for (gas in gases) {
   
 for (i in seq(start_job,min(end_job,nrow(data))) ) {
 bsub <- paste("bsub", "-q",which_queue, "-n 1",
