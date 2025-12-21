@@ -400,7 +400,7 @@ prepare_join_table <- function(filter_experiment, include_term = TRUE) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] []--base <main_scenario>]
+  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>]
 
 Options:
 -i <res>               Path where the results are (default: Results_montecarlo). For multiple folders separate with -
