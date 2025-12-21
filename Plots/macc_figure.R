@@ -85,11 +85,3 @@ fig3 <- ggplot() +
   theme(legend.position = "top") + xlim(c(0,100))
 ggsave("figure_3.svg",width=5.5,height=5.5,path=respath,plot=fig3)
 
-
-fig3 <- ggplot() +
-  geom_line(aes(x=miu*100,y=cost,color=as.factor(year)),linewidth=1.5)+
-  geom_hline(yintercept=0) +
-  scale_color_manual(values=c("#6BAED6","#08306B")) + 
-  theme_classic() + 
-  ylab("Abatement cost ($/tonCH4)") + xlab("Emission reductions (% of baseline)") +
-  theme(legend.position = "none")

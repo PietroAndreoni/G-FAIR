@@ -18,3 +18,5 @@ Results*/
 225*/
 !input/*.gdx
 .Rproj.user
+
+*.svg
