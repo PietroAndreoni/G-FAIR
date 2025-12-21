@@ -336,7 +336,7 @@ fit_distribution <- function(distribution = "lognormal",
 }
     
 
-prepare_join_table <- function(filter_experiment, include_term = TRUE) {
+prepare_join_table <- function(filter_experiment) {
   
   temp_exp <- copy(TATM)[experiment == filter_experiment]  # make copy to avoid modifying original
   temp_exp[, c("file", "experiment") := NULL]               # remove columns
@@ -392,7 +392,8 @@ prepare_join_table <- function(filter_experiment, include_term = TRUE) {
   
   replace_num_na0(base)
   base[, term := NULL] # remove term (readded later)
-  base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("term","gas")))
+  base <- merge(base,all_scenarios[!is.na(term)], by = setdiff(scenario_names,c("term")), allow.cartesian = TRUE)
+  base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("gas")))
   return(base)
 }
 
