@@ -10,6 +10,19 @@ igdx(dirname(Sys.which('gams'))) # Please have gams in your PATH!
 baseline <- read_parquet("input/data/harmsen_nonco2_baseline.lz4.parquet")
 macc <- read_parquet("input/data/harmsen_nonco2_macc.lz4.parquet")
 
+output_folder <- "Results_fig3"
+damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_")), read.csv)) 
+scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_")), read.csv)) %>% rename(scc=scc_nosrm)
+scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_")), read.csv)) %>% rename(scc_srm=scc)
+all_cols <- names(damnpv)[1:19]
+
+# filter scc and npc>0 and scenarios with both CH4 and CO2
+damnpv <- damnpv %>% 
+  inner_join(scc %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
+  inner_join(scc_srm %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
+  filter(npc_srm>0 & scc>0 & scc_srm>0) %>% 
+  ungroup() %>% unique()
+
 # enerdata co2 (provided in 2015 $/tonCO2)
 macc_co2 <- read_parquet("input/data/macc_ed_full_2022.lz4.parquet") %>% 
   filter(Variable=="Emissions") %>% 
@@ -73,15 +86,30 @@ macc_by_gas_w <- macc %>%
   mutate(cost=cost*ar4gwp[e]*12/44) %>%
   select(year,e,cost,miu)
 
+data <- damnpv %>% 
+  filter(gas=="ch4") %>%
+  mutate(year=pulse_time+2020) %>% 
+  filter(year %in% c(2025) )
+
 fig3 <- ggplot() +
-  geom_line(data=macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2025,2050) ),
-            aes(x=miu*100,y=cost/ar4gwp["ch4"],linetype=as.factor(year)),linewidth=1.5,color="red")+
-  geom_line(data=macc_co2 %>% filter(year %in% c(2025,2050) & Scenario=="EnerBase" ),
-            aes(x=miu*100,y=cost,linetype=as.factor(year)),linewidth=1.5,color="lightblue")+
+  geom_line(data=macc_by_gas_w %>% 
+              filter(e=="ch4" & year %in% c(2025) ),
+            aes(y=miu*100,x=cost,color=as.factor(year)),
+            linewidth=1,linetype=2)+
+  geom_density(data=data,aes(x=npc_srm,y=after_stat(scaled)*30, color=as.factor(year) ),
+               adjust=2,linetype=1, linewidth=1.5) +
   geom_hline(yintercept=0) +
-  scale_color_manual(values=c("#6BAED6","#08306B")) + 
+  scale_color_manual(name="",
+                     values=c("#6BAED6","#08306B","black")) + 
+  geom_point(data=data,
+             aes(x=npc_srm,
+                 color=as.factor(year),
+                 y=0),
+             shape=108) +
   theme_classic() + 
-  ylab("Abatement cost ($/tonCH4)") + xlab("Emission reductions (% of baseline)") +
-  theme(legend.position = "top") + xlim(c(0,100))
-ggsave("figure_3.svg",width=5.5,height=5.5,path=respath,plot=fig3)
+  ylab("Emission reductions (% of baseline)\nDensity (scaled, %)") + 
+  theme(legend.position = "none") + 
+  coord_cartesian(xlim=c(0,25000)) +
+  scale_x_continuous(labels = ~paste(., ./25, sep = "\n"),
+                     name = "Abatement cost ($/tonCH4)\nAbatement cost ($/tonCO2eq)") #+ facet_wrap(year~.,)
 

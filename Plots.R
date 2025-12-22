@@ -79,38 +79,6 @@ geom_point(aes(x=log(npc_norm),
   xlab("Normalized present cost (log)") + ylab("Density") +
   ggpubr::theme_pubr(legend="none")
 
-adjust_opt <- 1.06 * sd(data$npc_srm/25)*(length(data$npc_std))^(-1/5)
-data <- damnorm %>% 
-  filter(gas=="ch4") %>%
-  mutate(year=pulse_time+2020) %>% 
-  mutate(year=ifelse(year==2022,2025,year) ) %>% 
-  filter(year %in% c(2025,2050) & delta==0.02 )
-  
-fig3 <- ggplot() +
-  geom_line(data=macc_by_gas_w %>% 
-              filter(e=="ch4" & year %in% c(2025,2050) ),
-            aes(y=miu*100,x=cost,color=as.factor(year)),
-            linewidth=1,linetype=2)+
-  geom_density(data=data,aes(x=npc_srm,y=after_stat(scaled)*100, color=as.factor(year) ),
-               adjust=2,linetype=1, linewidth=1.5) +
-  # geom_density(data=data %>% mutate(npc_srm=(masknpv+damnpv+srmpnpv+dirnpv)/pulse_size),
-  #              aes(x=npc_srm,y=after_stat(scaled)*100, color=as.factor(year) ),
-  #              adjust=2,linetype=2,linewidth=1) +
-  geom_hline(yintercept=0) +
-  scale_color_manual(name="",
-                     values=c("#6BAED6","#08306B","black")) + 
-  geom_point(data=data,
-             aes(x=npc_srm,
-                 color=as.factor(year),
-                 y=0),
-             shape=108) +
-  theme_classic() + 
-  ylab("Emission reductions (% of baseline)\nDensity (scaled, %)") + 
-  theme(legend.position = "none") + 
-  coord_cartesian(xlim=c(0,25000)) +
-  scale_x_continuous(labels = ~paste(., ./25, sep = "\n"),
-                     name = "Abatement cost ($/tonCH4)\nAbatement cost ($/tonCO2eq)") #+ facet_wrap(year~.,)
-
 macc_co2 %>% filter(year %in% c(2025,2050) & Scenario=="EnerBase" ) %>%
   ungroup() %>% 
   select(year,miu,cost) %>% 
