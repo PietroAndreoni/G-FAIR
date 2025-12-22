@@ -401,11 +401,12 @@ prepare_join_table <- function(filter_experiment) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>]
+  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>] [--res <name_output>]
 
 Options:
 -i <res>               Path where the results are (default: Results_montecarlo). For multiple folders separate with -
 -o <output_folder>     Where to save results
+--res <name_output>    name of the output file (default: output.csv)
 --hpc <run_hpc>        T/F if running from Juno (T) or local (F) 
 --seed <seed>          seed number (for reproducibility)
 --chunk <chunk>        how many scenarios to run together
@@ -418,9 +419,9 @@ opts <- docopt(doc, version = 'Montecarlo')
 res <- ifelse(is.null(opts[["i"]]), "Results_montecarlo-Results_montecarlo_2-Results_montecarlo_3", as.character(opts["i"]) )
 res <- str_split(res,"-")[[1]]
 
-output_folder <- ifelse(is.null(opts[["o"]]), "Results_output_trynew", as.character(opts["o"]) )
+output_folder <- ifelse(is.null(opts[["o"]]), "Results_output", as.character(opts["o"]) )
 
-name_output <- paste0(tolower(gsub("[aeiouAEIOU_]", "", paste0(res, collapse = "_"))), ".csv")
+name_output <- paste0(ifelse(is.null(opts[["res"]]), "output", as.character(opts["o"]) ), ".csv")
 
 
 # Make sure the output folder exists (create it if not)
