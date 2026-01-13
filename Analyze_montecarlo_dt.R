@@ -77,8 +77,8 @@ npv_aggregator <- function(DT, keep_names = all_names) {
   compute_gwpt(DT)
   DT[, dam := gwpt * (alpha * (pmax(0,temp)^2 - pmax(0,temp_srm)^2))]
   DT[, direct_cost := srm_masking * forctoTg * TgtoUSD]
-  DT[, srm_pollution := vsl * (gwpt/gwp)  ^ (vsl_eta) * srm_masking * forctoTg * mortality_srm]
-  DT[, tropoz_pollution := vsl * (gwpt/gwp)  ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
+  DT[, srm_pollution := vsl * globaltouspc * (gwpt/gwp)  ^ (vsl_eta) * srm_masking * forctoTg * mortality_srm]
+  DT[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp)  ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
   DT[, imperfect_masking := 2 * gwpt * alpha * pmax(0,temp_base) * (1 - cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1 + srm/forc)]
   # aggregator
   res <- DT[, .(
@@ -448,6 +448,7 @@ if(run_hpc==F) {igdx()} else {
 gwp <- 105*1e12 # initial world gdp
 #forctoTg <- 1/0.2 # from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5897825/ 
 TgtoUSD <- 2250*10^6 # from https://iopscience.iop.org/article/10.1088/1748-9326/aba7e7/pdf  
+globaltouspc <- 10937 / 63515 # ratio between global GDPc and USgdpc in 2020
 #forctoUSD <- forctoTg * TgtoUSD # US$/(W/m^2)
 #ozone_rftoconc <- 50 / 0.263  # 50 ppb as https://www.sciencedirect.com/science/article/pii/S2542519622002601?ref=pdf_download&fr=RR-2&rr=9a07c2002fcb708b
 
@@ -484,7 +485,7 @@ cat("Proucing montecarlo realizations... \n")
 n_scenarios <- nrow(id_montecarlo)
 set.seed(seed)
 # add uncertainties
-id_montecarlo[, theta := round(fit_distribution(median=15,q5=5,q95=35,n=n_scenarios),0)]
+id_montecarlo[, theta := pmin(90, round(fit_distribution(median=10,q5=3,q95=30,n=n_scenarios),0) )]
 id_montecarlo[, alpha := round(fit_distribution(median=0.00575,sd=0.00575*382/179,n=n_scenarios),4)]
 id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),2)]
 id_montecarlo[, prob := round(runif(n_scenarios,0,1),1)]
@@ -493,13 +494,13 @@ id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.08,0.2),2)]
 # from https://pmc.ncbi.nlm.nih.gov/articles/instance/10631284/bin/NIHMS1940316-supplement-SI.pdf 
 # mortality / 100 ppb pulse of methane 
 id_montecarlo[, mortality_ozone := round( pmax(0, fit_distribution(distribution="normal",median=11250,q5=5000,q95=17500,n=n_scenarios) / 100, 0) ) ]
-id_montecarlo[, vsl := round(runif(n_scenarios,1,10),0) * 1e6]
+id_montecarlo[, vsl := round(runif(n_scenarios,1,15),0) * 1e6]
 id_montecarlo[, vsl_eta := round(runif(n_scenarios,0.4,1),1) ]
 id_montecarlo[, dg := round(fit_distribution(distribution="normal",median=0.015,sd=0.005,n=n_scenarios),3)]
 
 if (main_scenario == T) {
   id_montecarlo[, vsl := 10 * 1e6]
-  id_montecarlo[, delta := 0.02]
+  id_montecarlo[, delta := 0.03]
   id_montecarlo[, vsl_eta := 1 ]
 }
 
