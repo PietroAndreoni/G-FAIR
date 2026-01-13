@@ -500,7 +500,7 @@ id_montecarlo[, dg := round(fit_distribution(distribution="normal",median=0.015,
 
 if (main_scenario == T) {
   id_montecarlo[, vsl := 10 * 1e6]
-  id_montecarlo[, delta := 0.03]
+  id_montecarlo[, delta := 0.02]
   id_montecarlo[, vsl_eta := 1 ]
 }
 
