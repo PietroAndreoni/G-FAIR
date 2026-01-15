@@ -258,11 +258,11 @@ fit_distribution <- function(distribution = "lognormal",
 }
 
 # logical
-overwrite_data = ifelse(is.null(opts[["w"]]), F, as.logical(opts["w"]) )
+overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
 main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
 
 # numeric
-n_scenarios = ifelse(is.null(opts[["n"]]), 5, as.numeric(opts["n"]) )
+n_scenarios = ifelse(is.null(opts[["n"]]), 10000, as.numeric(opts["n"]) )
 seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 
 # strings
@@ -297,10 +297,10 @@ for (i in seq(1,n_scenarios,by=1)) {
     rcp <- sample(c("RCP3PD","RCP45","RCP6","RCP85"),1)
     
     # time of the pulse
-    pt <- sample(c(2,10,20,30,40,50,60,70,80,90,100),1)
+    pt <- sample(c(5,10,20,30,40,50,60,70,80),1)
     
     # cooling rate 
-    cool <- round(runif(1,min=0,max=40),0)
+    cool <- sample(seq(0,40,by=5),1)
     
     # termination year 
     term <- sample(seq(2300,2600,by=100),1)
