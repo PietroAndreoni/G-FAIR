@@ -1,8 +1,8 @@
 library(tidyverse)
-output_folder <- "Results_0312"
-damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output_")), read.csv)) 
-scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output_")), read.csv)) %>% rename(scc=scc_nosrm)
-scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output_")), read.csv)) %>% rename(scc_srm=scc)
+output_folder <- "C:/Users/Andreoni/OneDrive - The University of Chicago/G-FAIR/Results_2112"
+damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv)) 
+scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output")), read.csv)) %>% rename(scc=scc_nosrm)
+scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output")), read.csv)) %>% rename(scc_srm=scc)
 all_cols <- names(damnpv)[1:19]
 
 # filter scc and npc>0 and scenarios with both CH4 and CO2
@@ -67,58 +67,17 @@ quantile(damnpv %>% filter(gas=="ch4") %>% pull(npc_srm), 0.99)/quantile(damnpv 
 adjust_opt <- log(1.06 * sd(damnorm$npc_std)*(length(damnorm$npc_std))^(-1/5))
 
 density_plot <- ggplot(damnorm) +
-  geom_density(aes(x=log(npc_norm),
+  geom_density(aes(x=log10(npc_norm),
                    color=gas),
                adjust=1,
                linewidth=1.5) +
-geom_point(aes(x=log(npc_norm),
+geom_point(aes(x=log10(npc_norm),
                color=gas,
                y=-(as.numeric(as.factor(gas))-1)/100),
            shape=108) +
-  coord_cartesian(xlim = c(-5,5) ) +
-  xlab("Normalized present cost (log)") + ylab("Density") +
+  coord_cartesian(xlim = c(-2.5,2.5) ) +
+  xlab("Log 10 of normalized present cost") + ylab("Density") +
   ggpubr::theme_pubr(legend="none")
-
-macc_co2 %>% filter(year %in% c(2025,2050) & Scenario=="EnerBase" ) %>%
-  ungroup() %>% 
-  select(year,miu,cost) %>% 
-  full_join(damnorm %>% filter(gas=="co2" ) %>% mutate(cost=case_when( npc_srm <= 20 ~ round(npc_srm / 5) * 5,
-                                                                       npc_srm <=110 ~ round(npc_srm / 10) * 10,
-                                                                       npc_srm <=520 ~ round(npc_srm / 20) * 20,
-                                                                       npc_srm <=925 ~ round(npc_srm / 40) * 40,
-                                                                       npc_srm <=1000 ~ round(npc_srm / 50) * 50,
-                                                                      .default= 1000 ) ) ) %>% 
-              ggplot() +
-  geom_density(aes(x=miu,color=as.factor(year)),adjust=5)
-
-macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2025,2050) ) %>%
-  ungroup() %>% 
-  select(year,miu,cost) %>% mutate(cost=round(cost/25*3.66  / 20) * 20) %>% 
-  full_join(damnorm %>% filter(gas=="ch4" ) %>% mutate(cost=pmax(round(npc_srm / 20) * 20), 4000 )) %>% ggplot() +
-  geom_density(aes(x=miu,color=as.factor(year)),adjust=5)
-
-
-data <- damnorm %>% 
-  filter(gas=="co2") %>%
-  mutate(year=pulse_time+2020) %>% 
-  mutate(year=ifelse(year==2022,2025,year) ) %>% 
-  filter(year %in% c(2025,2050))
-
-fig3_co2 <- ggplot() +
-  # geom_line(data=macc_by_gas_w %>% filter(e=="ch4" & year %in% c(2025,2050) ),
-  #           aes(y=miu*100,x=cost,color=as.factor(year)),linewidth=1.5)+
-  geom_line(data=macc_co2 %>% filter(year %in% c(2025,2050) & Scenario=="EnerBase" ),
-            aes(y=miu*100,x=cost,color=as.factor(year)),linewidth=1.5)+
-  geom_density(data=data,aes(x=npc_srm,y=after_stat(scaled)*100,color=as.factor(year)),adjust=5) +
-  geom_point(data=data,
-             aes(x=npc_srm,
-                 y=0),
-             shape=108) +
-  geom_hline(yintercept=0) +
-  scale_color_manual(values=c("#6BAED6","#08306B")) + 
-  theme_classic() + 
-  ylab("Emission reductions (% of baseline) / density (scaled)") + xlab("Abatement cost ($/tonCH4)") +
-  theme(legend.position = "top") + xlim(c(0,1000))
 
 library(gsaot)
 gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="ch4") %>% #filter(npc_srm>quantile(npc_srm,0.01)  & npc_srm<quantile(npc_srm,0.99)) %>% 
@@ -128,7 +87,7 @@ stat_analysis_ch4 <- ot_indices_1d(gsoat_data %>% select(-npc_srm),
                                    gsoat_data %>% pull(npc_srm), 
                                    M= 15,
                                    boot = T,
-                                   R = 1000)
+                                   R = 100)
 lowerbound_ch4 <- irrelevance_threshold(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
 
 gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="co2") %>%   
@@ -139,7 +98,7 @@ stat_analysis_co2 <- ot_indices_1d(gsoat_data %>%
                                    gsoat_data %>% pull(npc_srm), 
                                    M= 15,
                                    boot = T,
-                                   R = 1000)
+                                   R = 100)
 lowerbound_co2 <- irrelevance_threshold(gsoat_data %>% pull(npc_srm), M= 15, solver="1d")
 
 input_categories <- c("ecs"="Climate",
@@ -189,32 +148,47 @@ importance_co2 <- ggplot( ) +
   theme(legend.position = "top") + scale_fill_viridis_d(name="") +
   scale_x_discrete(guide = guide_axis(n.dodge = 2))+ ggpubr::theme_pubr()
 
+require(patchwork)
 importances <- (importance_co2+importance_ch4)+
   plot_layout(guides = "collect") & theme(legend.position = 'bottom')
 
 gsoat_data <- damnorm %>% ungroup() %>% 
-  group_by_at(setdiff(all_cols,c("gas","npc_std")) ) %>%  
-  summarise(diff=npc_std[gas=="co2"]-npc_std[gas=="ch4"]) 
+  group_by_at(setdiff(all_cols,c("gas","npc_norm")) ) %>%  
+  summarise(diff=log10(npc_norm[gas=="co2"])-log10(npc_norm[gas=="ch4"]) ) %>% ungroup()
+#  summarise(diff=npc_norm[gas=="co2"]-npc_norm[gas=="ch4"] ) %>% ungroup()
 
 stat_analysis_diff <- ot_indices_1d(gsoat_data %>% 
                                       select(-diff),
                                     gsoat_data %>% pull(diff), 
                                     M= 15,
                                     boot = T,
-                                    R = 1000)
+                                    R = 100)
 lowerbound_diff <- irrelevance_threshold(gsoat_data %>% pull(diff), M= 15, solver="1d")
 
-importance_diff <- ggplot( ) + 
+data <- data.frame(i=seq(1,1000),irr=NA,sample=NA)
+for(i in seq(1,1000)) {
+data[i,"sample"] <- pmin(nrow(gsoat_data),sample(seq(1000,10000,by=100),1))
+data[i,"irr"] <- irrelevance_threshold(sample(gsoat_data %>% pull(diff),data[i,"sample"]), M= 15, solver="1d")$indices
+data[i,"irr_tot"] <- irrelevance_threshold(gsoat_data %>% pull(diff), M= 15, solver="1d")$indices
+
+ }
+
+hist(gsoat_data %>% pull(diff))
+ggplot(data) +
+  geom_point(aes(x=sample,y=irr))
+
+importance_diff <- ggplot() + 
   geom_bar(data=tibble("input"=names(stat_analysis_diff$indices),
                        "original"=stat_analysis_diff$indices), aes(x=reorder(input, -original),
                                                                    y=original,
                                                                    fill=input_categories[input]),stat="identity",color="black") + 
-  geom_hline(yintercept=lowerbound_diff$indices) +
+#  geom_hline(yintercept=lowerbound_diff$indices) +
   geom_errorbar(data=as_tibble(stat_analysis_diff$indices_ci),
                 aes(x=reorder(input, -original),
                     ymin=low.ci,
-                    ymax=high.ci),stat="identity",position="dodge",color="black") +
-  ylab("importance [ch4-co2]") + xlab("") + 
+                    ymax=high.ci),
+                stat="identity",position="dodge",color="black") +
+  ylab("importance [log10(ch4)-log10(co2)]") + xlab("") + 
   theme(legend.position = "top") + scale_fill_viridis_d(name="") +
   scale_x_discrete(guide = guide_axis(n.dodge = 2))+ ggpubr::theme_pubr()
 
@@ -223,68 +197,50 @@ damnorm %>%
   geom_abline(slope=1,intercept=0)+ ggpubr::theme_pubr()
 
 dr <- ggplot(damnorm) +
-  geom_smooth(aes(x=delta*100,y=npc_std,color=gas),
+  geom_smooth(aes(x=delta*100,y=log10(npc_norm),color=gas),
               method="loess") +
-  xlab("Discount rate [%]") + ylab("Normalized cost")+
-  coord_cartesian(ylim = c(0,10) ) + ggpubr::theme_pubr(legend="none")
+  xlab("Discount rate [%]") + ylab("Log 10 of normalized cost") +
+  coord_cartesian(ylim = c(-0.5,1) ) + ggpubr::theme_pubr(legend="none")
 
 alpha <- ggplot(damnorm) +
-  geom_smooth(aes(x=alpha*100,y=npc_std,color=gas),
+  geom_smooth(aes(x=alpha*100,y=log(npc_norm),color=gas),
               method="loess") +
-  geom_density(aes(x=alpha*100,y=after_stat(scaled)*5)) +
+  geom_density(aes(x=alpha*100,y=after_stat(scaled))) +
   xlab("Climate damages [%gdp/K^2]") + ylab("") +
   coord_cartesian(xlim = c(quantile(damnorm$alpha*100, 0.01, na.rm=TRUE), 
                            quantile(damnorm$alpha*100, 0.95, na.rm=TRUE)),
-                  ylim = c(0,10) ) + ggpubr::theme_pubr(legend="none")
+                  ylim = c(-0.5,1) ) + 
+  ggpubr::theme_pubr(legend="none")
 
 theta <- ggplot(damnorm) +
-  geom_smooth(aes(x=theta,y=npc_std,color=gas),
+  geom_smooth(aes(x=theta,y=log10(npc_norm),color=gas),
               method="loess") +
-  geom_density(aes(x=theta,y=after_stat(scaled)*5)) +
-  xlab("SAI angle [°]") + ylab("Normalized cost") +
+  geom_density(aes(x=theta,y=after_stat(scaled))) +
+  xlab("SAI angle [°]") + ylab("") +
   coord_cartesian(xlim = c(quantile(damnorm$theta, 0.01, na.rm=TRUE), 
                            quantile(damnorm$theta, 0.99, na.rm=TRUE)),
-                  ylim = c(0,10) ) + ggpubr::theme_pubr(legend="none")
+                  ylim = c(-0.5,1) ) + 
+  ggpubr::theme_pubr(legend="none")
+
+term <- ggplot(damnorm) +
+  geom_smooth(aes(x=2020+term,y=log10(npc_norm),color=gas),
+              method="loess") +
+  xlab("Year of termination") + ylab("") +
+  coord_cartesian(xlim = c(2020,2400),
+                  ylim = c(-0.5,1) ) + 
+  ggpubr::theme_pubr(legend="none")
 
 ecs <- ggplot(damnorm) +
-  geom_smooth(aes(x=ecs/10,y=npc_std,color=gas),
+  geom_smooth(aes(x=ecs/10,y=log10(npc_norm),color=gas),
               method="loess") +
-  geom_density(aes(x=ecs/10,y=after_stat(scaled)*5)) +
+  geom_density(aes(x=ecs/10,y=after_stat(scaled))) +
   xlab("Climate equilibrium sensitivity [K]") + ylab("") +
   coord_cartesian(xlim = c(quantile(damnorm$ecs/10, 0.01, na.rm=TRUE), 
                            quantile(damnorm$ecs/10, 0.99, na.rm=TRUE)),
-                  ylim = c(0,10)) + ggpubr::theme_pubr(legend="none")
+                  ylim = c(-0.5,1)) + ggpubr::theme_pubr(legend="none")
 
-dg <- ggplot(damnorm) +
-  geom_smooth(aes(x=dg*100,y=npc_std,color=gas),
-              method="loess") +
-  geom_density(aes(x=dg*100,y=after_stat(scaled)*5)) +
-  xlab("Global economic growth [%/yr]") + ylab("") +
-  coord_cartesian(xlim = c(quantile(damnorm$dg*100, 0.01, na.rm=TRUE), 
-                           quantile(damnorm$dg*100, 0.99, na.rm=TRUE)),
-                  ylim = c(0,10)) + ggpubr::theme_pubr(legend="none")
-
-pulse_time <- ggplot(damnorm %>% filter(pulse_time < term)) +
-  geom_smooth(aes(x=pulse_time+2020,y=npc_norm,color=gas),
-              method="loess") +
-  xlab("Year of pulse") + ylab("") +
-  coord_cartesian(xlim = c(2020,2100),
-                  ylim = c(0,10))  + 
-  ggpubr::theme_pubr(legend="none")
-
-
-pulse_time <- ggplot(damnorm %>% filter(term+2020<2500 & cool_rate!=0)) +
-  geom_smooth(aes(x=term,
-                  y=npc_srm,
-                  color=gas),
-              method="loess") +
-  xlab("Year of pulse") + ylab("") +
-  facet_wrap(gas~.,scales="free") +
-  ggpubr::theme_pubr(legend="none")
-
-library(patchwork)
 void <- ggplot() + theme_void()
-fig2 <- (void + density_plot + void + plot_layout(widths = c(0.2,1,0.2)) ) / (dr + dg) / (theta + alpha) + plot_layout(heights=c(1,0.6,0.6))
+fig2 <- (void + density_plot + void + plot_layout(widths = c(0.2,1,0.2)) ) / (dr + term) / (theta + alpha) + plot_layout(heights=c(1,0.6,0.6))
 
 ggsave("fig_2.png",fig2,width=12,height=12,dpi=300)
 ggsave("fig_3.png",fig3,width=8,height=7,dpi=300)
