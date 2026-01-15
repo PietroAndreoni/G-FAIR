@@ -58,10 +58,11 @@ filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 
 scenarios_launched <- 0
 gases <- c("ch4","co2")
-
-for (gas in gases) {
   
 for (i in seq(start_job,min(end_job,nrow(data))) ) {
+  
+for (gas in gases) {
+    
 bsub <- paste("bsub", "-q",which_queue, "-n 1",
               "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
 
