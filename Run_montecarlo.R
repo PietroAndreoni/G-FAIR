@@ -57,6 +57,7 @@ cat("Launching jobs... \n")
 filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 
 scenarios_launched <- 0
+problematic_data <- data.frame()
 gases <- c("ch4","co2")
   
 for (i in seq(start_job,min(end_job,nrow(data))) ) {

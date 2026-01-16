@@ -401,12 +401,12 @@ prepare_join_table <- function(filter_experiment) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-i <res>] [-o <output_folder>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>] [--res <name_output>]
+  Analyze_montecarlo.R [-i <input>] [-o <results>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>] [--res <output_folder>]
 
 Options:
--i <res>               Path where the results are (default: Results_montecarlo). For multiple folders separate with -
--o <output_folder>     Where to save results
---res <name_output>    name of the output file (default: output.csv)
+-i <input>             Path where the montecarlo id are 
+-o <results>           Where to save results
+--res <output_folder>  name of the output folder (default: Results_montecarlo). For multiple folders separate with -
 --hpc <run_hpc>        T/F if running from Juno (T) or local (F) 
 --seed <seed>          seed number (for reproducibility)
 --chunk <chunk>        how many scenarios to run together
@@ -416,12 +416,13 @@ Options:
 
 opts <- docopt(doc, version = 'Montecarlo')
 
-res <- ifelse(is.null(opts[["i"]]), "Results_montecarlo-Results_montecarlo_2-Results_montecarlo_3", as.character(opts["i"]) )
+res <- ifelse(is.null(opts[["res"]]), "Results_montecarlo", as.character(opts["res"]) )
 res <- str_split(res,"-")[[1]]
 
-output_folder <- ifelse(is.null(opts[["o"]]), "Results_output", as.character(opts["o"]) )
+input_folder <- ifelse(is.null(opts[["i"]]), "Montecarlo", as.character(opts["i"]) )
+output_folder <- ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o"]) )
 
-name_output <- paste0(ifelse(is.null(opts[["res"]]), "output", as.character(opts["o"]) ), ".csv")
+name_output <- "npc_output.csv"
 
 
 # Make sure the output folder exists (create it if not)
@@ -430,8 +431,9 @@ if (!dir.exists(output_folder)) {
 }
 
 if (any(!dir.exists(res)) ) stop("some of the folder specified do not exsist")
+if (!dir.exists(input_folder) ) stop("no id folder")
 
-run_hpc = ifelse(is.null(opts[["hpc"]]), T, as.logical(opts["hpc"]) )
+run_hpc = ifelse(is.null(opts[["hpc"]]), F, as.logical(opts["hpc"]) )
 seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 N = ifelse(is.null(opts[["chunk"]]), 100, as.integer(opts["chunk"]) )
 skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) ) 
@@ -463,7 +465,7 @@ cat("Sanitizing the data...\n")
 sanitized_names <- extract_names_dt(filelist)
 
 # Load id_montecarlo from folders
-id_list <- lapply(res, function(folder) {
+id_list <- lapply(input_folder, function(folder) {
   read.csv(file.path(folder, "id_montecarlo.csv"), stringsAsFactors = FALSE)
 })
 id_montecarlo <- rbindlist(id_list, fill = TRUE)
@@ -715,8 +717,8 @@ combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / puls
 # Save final output (combined table)
 # ----------------------------
 fwrite(combined_wide, file = file.path(output_folder, name_output), append = TRUE)
-fwrite(scc_agg, file = file.path(output_folder, paste0("scc_",name_output)), append = TRUE)
-fwrite(scc_agg2, file = file.path(output_folder, paste0("sccnosrm_",name_output)), append = TRUE)
+fwrite(scc_agg, file = file.path(output_folder, paste0("scc_",str_remove(name_output,"npc_") )), append = TRUE)
+fwrite(scc_agg2, file = file.path(output_folder, paste0("sccnosrm_",str_remove(name_output,"npc_"))), append = TRUE)
 
 }
 
