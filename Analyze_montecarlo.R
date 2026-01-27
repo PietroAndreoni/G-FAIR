@@ -449,8 +449,7 @@ if(run_hpc==F) {igdx()} else {
 ## climate damage function parameters
 gwp <- 105*1e12 # initial world gdp
 #forctoTg <- 1/0.2 # from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5897825/ 
-TgtoUSD <- 2250*10^6 # from https://iopscience.iop.org/article/10.1088/1748-9326/aba7e7/pdf  
-globaltouspc <- 10937 / 63515 # ratio between global GDPc and USgdpc in 2020
+globaltouspc <- 1.82 * 10937 / 63515 # ratio between global GDPc and USgdpc in 2020, adjusted to match McDuffie 2023 
 #forctoUSD <- forctoTg * TgtoUSD # US$/(W/m^2)
 #ozone_rftoconc <- 50 / 0.263  # 50 ppb as https://www.sciencedirect.com/science/article/pii/S2542519622002601?ref=pdf_download&fr=RR-2&rr=9a07c2002fcb708b
 
@@ -492,11 +491,12 @@ id_montecarlo[, alpha := round(fit_distribution(median=0.00575,sd=0.00575*382/17
 id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),2)]
 id_montecarlo[, prob := round(runif(n_scenarios,0,1),1)]
 id_montecarlo[, mortality_srm := round( pmax(0,fit_distribution(median=7400,q5=2300,q95=16000,n=n_scenarios),0) ) ]
-id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.08,0.2),2)]
+id_montecarlo[, forctoTg := round( 1/rtri(n_scenarios,0.2,1.5,0.8),2)]
+id_montecarlo[, TgtoUSD := round( rtri(n_scenarios, 0.75, 3, 1.5),2)]
 # from https://pmc.ncbi.nlm.nih.gov/articles/instance/10631284/bin/NIHMS1940316-supplement-SI.pdf 
 # mortality / 100 ppb pulse of methane 
 id_montecarlo[, mortality_ozone := round( pmax(0, fit_distribution(distribution="normal",median=11250,q5=5000,q95=17500,n=n_scenarios) / 100, 0) ) ]
-id_montecarlo[, vsl := round(runif(n_scenarios,1,15),0) * 1e6]
+id_montecarlo[, vsl := round(runif(n_scenarios,7.5,13.6),0) * 1e6]
 id_montecarlo[, vsl_eta := round(runif(n_scenarios,0.4,1),1) ]
 id_montecarlo[, dg := round(fit_distribution(distribution="normal",median=0.015,sd=0.005,n=n_scenarios),3)]
 
@@ -504,6 +504,7 @@ if (main_scenario == T) {
   id_montecarlo[, vsl := 10 * 1e6]
   id_montecarlo[, delta := 0.02]
   id_montecarlo[, vsl_eta := 1 ]
+  id_montecarlo[, theta := 10 ]
 }
 
 all_names <- c("gas", names(id_montecarlo))
@@ -667,7 +668,7 @@ replace_num_na0(scc)
 scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm","forctoTg"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
 scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
-scc[, tropoz_pollution := vsl * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
+scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
 scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)),na.rm = TRUE),
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), 
@@ -688,7 +689,7 @@ replace_num_na0(scc)
 scc <- merge(scc, id_montecarlo[, c("ecs","tcr","rcp","pulse_time","alpha","delta","mortality_ozone","vsl","vsl_eta","dg"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
 scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
-scc[, tropoz_pollution := vsl * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
+scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_pulse)^2 - pmax(0,temp_base)^2) )]
 scc_agg2 <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)),na.rm = TRUE),
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), 

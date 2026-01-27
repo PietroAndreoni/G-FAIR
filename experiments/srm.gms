@@ -3,7 +3,7 @@ $setglobal rate_of_cooling 10 #in deg/millennium, by default half of current war
 $setglobal start_rampdown "na"
 $setglobal end_rampdown "na"
 $setglobal rate_of_cooling 0
-$setglobal pulse_size 10 #percentage increase in emissions
+$setglobal pulse_size 100 #percentage increase in emissions
 $setglobal pulse_time 5 #year of pulse (1 is 2020)
 $setglobal methane_source "mix" # "fossil", "biogenic", "mix"
 
