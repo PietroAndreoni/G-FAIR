@@ -75,7 +75,9 @@ SCALARS
         catm_preindustrial          "Equilibrium concentration atmosphere  (GtCO2)"            
         tslow0          "Initial temperature box 1 change in 2020 (K from 1765)"  /0.1477  /
         tfast0          "Initial temperature box 2 change in 2020 (K from 1765)"  /1.099454/
-        tatm0           "Initial atmospheric temperature change in 2020"          /1.24715 /;
+        tatm0           "Initial atmospheric temperature change in 2020"          /1.24715 /
+        conv_frac       "Fraction of biogenic where the source is atmospheric CO2" /1/
+        oxi_frac        "Fraction of methane oxidized to CO2"                      /0.9/;
  
 PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"  
                    taubox(box)    "Decay time constant for reservoir *  (year)"
@@ -169,10 +171,10 @@ eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and not preghg(ghg) and active(ghg)).
                         ( (  W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
 ** conversion of CO2 into methane by biogenic processes (subtracted from CO2 emissions)
-eq_methconv(t)..        CO2toCH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * ( W_EMI('ch4',t) * ( 1- FF_CH4(t) ) + natural_emissions('ch4',t) );
+eq_methconv(t)..        CO2toCH4(t) =E= conv_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * ( W_EMI('ch4',t) * ( 1- FF_CH4(t) ) + natural_emissions('ch4',t) );
 
 ** methanize oxidation to CO2 (returning to CO2 emissions)
-eq_methoxi(t)..         CO2fromCH4(t) =E= 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * sum(tt$(tt.val lt t.val and tt.val gt t.val - 100), (W_EMI('ch4',tt) + natural_emissions('ch4',tt))  * ( (1 - exp(-(t.val-tt.val)/taughg('ch4')) ) - (1 - exp(-((t.val-tstep)-tt.val)/taughg('ch4')) ) ) ) ;
+eq_methoxi(t)..         CO2fromCH4(t) =E= oxi_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * sum(tt$(tt.val lt t.val and tt.val gt t.val - 100), (W_EMI('ch4',tt) + natural_emissions('ch4',tt))  * ( (1 - exp(-(t.val-tt.val)/taughg('ch4')) ) - (1 - exp(-((t.val-tstep)-tt.val)/taughg('ch4')) ) ) ) ;
 
 ** forcing for the three main greenhouse gases (CO2, CH4, N2O) 
 eq_forcco2(t)..         FORCING('co2',t) =E=  ( -2.4e-7 * sqr( CONC('co2',t) - conc_preindustrial('co2') ) +
