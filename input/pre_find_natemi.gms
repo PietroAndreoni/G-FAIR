@@ -11,8 +11,6 @@ eq_constantemi(ghg,t)..       NATEMI(ghg) =E= W_EMI(ghg,t);
 model constant_concentrations_ghg /eq_concghg,eq_constantconc,eq_constantemi/;
 
 CONC.FX(ghg,tfirst) = conc_preindustrial(ghg);
-active(ghg)$(not sameas(ghg,'co2')) = yes;
 solve constant_concentrations_ghg using nlp minimizing obj;
 natural_emissions(ghg,t) = NATEMI.l(ghg);
-active(ghg) = no;
 *************** end natural emissions

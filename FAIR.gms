@@ -42,7 +42,6 @@ set pre "Precursor gases (that are not ghgs)" /'co','no_x','nmvoc'/;
 set cghg(ghg) "Core greenhouse gases";
 set oghg(ghg) "Other well-mixed greenhouse gases with emission and concentration represenation";
 set preghg(ghg) "Other greenhouse gases without emission and concentration represenation";
-set active(ghg) "active greenhouse gases (if not, assumed constant concentration at initial levels)";
 cghg("co2") = yes;
 cghg("ch4") = yes;
 cghg("n2o") = yes;
@@ -77,7 +76,9 @@ SCALARS
         tfast0          "Initial temperature box 2 change in 2020 (K from 1765)"  /1.099454/
         tatm0           "Initial atmospheric temperature change in 2020"          /1.24715 /
         conv_frac       "Fraction of biogenic where the source is atmospheric CO2" /1/
-        oxi_frac        "Fraction of methane oxidized to CO2"                      /0.9/;
+        oxi_frac        "Fraction of methane oxidized to CO2"                      /0.9/
+        rmT             "Temperature sensitivity of decay time scaling factor for methane" /0.3/
+        rmC             "Concentration sensitivity of decay time scaling factor for methane" / 0.00032 /;
  
 PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"  
                    taubox(box)    "Decay time constant for reservoir *  (year)"
@@ -117,7 +118,7 @@ VARIABLES
         C_SINKS(t)     "Accumulated carbon in ocean and other sinks (GtC)"
         C_ATM(t)       "Accumulated carbon in atmoshpere (GtC)"
         IRF(t)         "IRF100 at time t"
-        ALPHA(t)       "Carbon decay time scaling factor"
+        ALPHA(ghg,t)       "Carbon decay time scaling factor"
         SRM(t)         "Forcing masked with solar radiation management (W/m2)"
         OBJ;
 
@@ -148,33 +149,34 @@ EQUATIONS
         eq_tfast            "Temperature box 2 law of motion"
         eq_irflhs           "Left-hand side of IRF100 equation"
         eq_irfrhs           "Right-hand side of IRF100 equation"
+        eq_alphach4         "Decay time scaling factor for methane"
         eq_obj;
 
 ***** parameters initialization
 $batinclude "Model/parameters.gms"
 
 ** Four box model for CO2 emission-to-concentrations (FAIR formulation)
-eq_reslom(box,t+1)$(active('co2'))..       RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
+eq_reslom(box,t+1)..       RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA('co2',t) ) ) +
                                             emshare(box) * ( W_EMI('co2',t+1) + CO2fromCH4(t+1) - CO2toCH4(t+1) ) * emitoconc('co2') * tstep;
 
-eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) );
+eq_concco2(t)..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) );
 
-eq_catm(t)$(active('co2'))..               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
+eq_catm(t)..               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
         
-eq_cumemi(t+1)$(active('co2'))..           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + CO2fromCH4(t+1) - CO2toCH4(t+1) )*tstep;
+eq_cumemi(t+1)..           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + CO2fromCH4(t+1) - CO2toCH4(t+1) )*tstep;
 
-eq_csinks(t)$(active('co2'))..             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
+eq_csinks(t)..             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
     
 ** Single box model for non-CO2 GHGs  
-eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and not preghg(ghg) and active(ghg))..      
-                        CONC(ghg,t+1) =E= CONC(ghg,t) * exp(-tstep/taughg(ghg)) + 
+eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and not preghg(ghg))..      
+                        CONC(ghg,t+1) =E= CONC(ghg,t) * exp(-tstep/(ALPHA(ghg,t) * taughg(ghg)) ) + 
                         ( (  W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
 
 ** conversion of CO2 into methane by biogenic processes (subtracted from CO2 emissions)
 eq_methconv(t)..        CO2toCH4(t) =E= conv_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * ( W_EMI('ch4',t) * ( 1- FF_CH4(t) ) + natural_emissions('ch4',t) );
 
 ** methanize oxidation to CO2 (returning to CO2 emissions)
-eq_methoxi(t)..         CO2fromCH4(t) =E= oxi_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * sum(tt$(tt.val lt t.val and tt.val gt t.val - 100), (W_EMI('ch4',tt) + natural_emissions('ch4',tt))  * ( (1 - exp(-(t.val-tt.val)/taughg('ch4')) ) - (1 - exp(-((t.val-tstep)-tt.val)/taughg('ch4')) ) ) ) ;
+eq_methoxi(t)..         CO2fromCH4(t) =E= oxi_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * sum(tt$(tt.val lt t.val and tt.val gt t.val - 100), (W_EMI('ch4',tt) + natural_emissions('ch4',tt))  * ( (1 - exp(-(t.val-tt.val)/(ALPHA('ch4',t)*taughg('ch4')) ) ) - (1 - exp(-((t.val-tstep)-tt.val)/(ALPHA('ch4',t)*taughg('ch4')) ) ) ) ) ;
 
 ** forcing for the three main greenhouse gases (CO2, CH4, N2O) 
 eq_forcco2(t)..         FORCING('co2',t) =E=  ( -2.4e-7 * sqr( CONC('co2',t) - conc_preindustrial('co2') ) +
@@ -200,7 +202,7 @@ eq_forco3trop(t)..      FORCING('o3trop',t) =E= 1.74e-4 * (CONC('ch4',t) - conc_
                                             ( 0.032 * (exp(-1.35*(TATM(t)) ) - 1) - sqrt( sqr(0.032 * (exp(-1.35*(TATM(t))) - 1) ) + sqr(1e-8)) ) / 2   ;
 
 ** forcing for other well-mixed greenhouse gases (F-gases, SOx, BC, OC, NH3, CO, NMVOC, NOx)  
-eq_forcoghg(oghg,t)$(active(oghg))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
+eq_forcoghg(oghg,t)..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
 ** forcing to temperature 
 eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - forcing_srm(t) - SRM(t) ) * ( 1 - exp(-tstep/dslow) );
@@ -209,12 +211,15 @@ eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(gh
 
 eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
-** calculate alphas imposing IRF 
-eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
+* calculate alphas imposing IRF 
+eq_irflhs(t)..    IRF(t)    =E= ALPHA('co2',t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA('co2',t)*taubox(box)) ) ) );
 
-*** IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
-eq_irfrhs(t)$(active('co2'))..    IRF(t)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
+* IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
+eq_irfrhs(t)..    IRF(t)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
                                                     sqrt( sqr(irf_max - (irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) + sqr(delta) ) ) / 2;
+
+* calculate alpha for methane as in FAIRv2.0
+eq_alphach4(t)..    ALPHA('ch4',t) =E= (taughg('ch4') + rmT * TATM(t) + rmC * (CONC('ch4',t) - conc_preindustrial('ch4')) ) / taughg('ch4');
 
 eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
 
@@ -223,12 +228,15 @@ CONC.LO(cghg,t) = 1e-9;
 CONC.LO(oghg,t) = 0;
 TATM.LO(t)  = -10;
 TATM.UP(t)  = 20;
-ALPHA.lo(t) = 1e-2;
-ALPHA.up(t) = 1e3;
+ALPHA.lo(ghg,t) = 1e-2;
+ALPHA.up(ghg,t) = 1e3;
 IRF.up(t) = 100;
 FF_CH4.up(t) = 1;
 ** Starting guess
-ALPHA.l(t) = 0.35;
+ALPHA.l(ghg,t) = 0.35;
+ALPHA.l('co2',t) = 0.35;
+** ALPHA equals 1 for constant lifetime agents
+ALPHA.fx(ghg,t)$(not sameas(ghg,'co2') and not sameas(ghg,'ch4')) = 1;
 ** Deactivate SRM by default
 SRM.fx(t) = 0;
 
@@ -260,7 +268,6 @@ $batinclude "Model/initialization.gms"
 $if set no_oforc forcing_exogenous(t) = 0;
 
 *** solve the basic model
-active(ghg) = yes;
 solve fair using nlp minimizing OBJ;
 execute_unload "%results_folder%/%rcp%_EXPbase_ECS%ecs%_TCR%tcr%_IC%initial_conditions%.gdx";
 

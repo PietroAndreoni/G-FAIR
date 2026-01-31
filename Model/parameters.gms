@@ -9,7 +9,7 @@ taubox("deep ocean") = 394.4;
 taubox("biosphere") = 36.53;
 taubox("ocean mixed layer") = 4.304;
 
-taughg("ch4") = 9.3;
+taughg("ch4") = 8.25;
 taughg("n2o") = 121;
 
 emshare("geological processes") = 0.2173;
