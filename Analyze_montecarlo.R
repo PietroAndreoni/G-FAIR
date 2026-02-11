@@ -491,8 +491,8 @@ id_montecarlo[, alpha := round(fit_distribution(median=0.00575,sd=0.00575*382/17
 id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),2)]
 id_montecarlo[, prob := round(runif(n_scenarios,0,1),1)]
 id_montecarlo[, mortality_srm := round( pmax(0,fit_distribution(median=7400,q5=2300,q95=16000,n=n_scenarios),0) ) ]
-id_montecarlo[, forctoTg := round( 1/rtri(n_scenarios,0.2,1.5,0.8),2)]
-id_montecarlo[, TgtoUSD := round( rtri(n_scenarios, 0.75, 3, 1.5),2)]
+id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.2,1.5),2)]
+id_montecarlo[, TgtoUSD := round( runif(n_scenarios, 0.75, 3),2)]
 # from https://pmc.ncbi.nlm.nih.gov/articles/instance/10631284/bin/NIHMS1940316-supplement-SI.pdf 
 # mortality / 100 ppb pulse of methane 
 id_montecarlo[, mortality_ozone := round( pmax(0, fit_distribution(distribution="normal",median=11250,q5=5000,q95=17500,n=n_scenarios) / 100, 0) ) ]
