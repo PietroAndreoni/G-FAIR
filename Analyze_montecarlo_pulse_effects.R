@@ -31,8 +31,8 @@ require_gdxtools()
 #    on relative time t_rel=t-pulse_time and save to disk.
 # 3) Reload compact tables and compute year-by-year quantiles by gas.
 # 4) Compute coherent percentile trajectories by selecting real runs
-#    that minimize RMSE to the percentile curve.
-#    This includes Dtemp, Dforc, and SRMminus.
+#    from Dtemp only (with monotonic percentile constraint), then
+#    project the same selected runs onto Dforc and SRMminus.
 # 5) Overlay -SRM (from srmpulsemasked) on forcing panel and plot:
 #    a) coherent-trajectory ribbons/median
 #    b) year-by-year ribbons/median
@@ -82,49 +82,85 @@ quantile_summary <- function(DT, value_col, group_cols) {
   out
 }
 
-select_percentile_runs <- function(DT, value_col, group_cols, run_cols, probs) {
-  # Select coherent trajectories:
-  # for each percentile p and group (e.g., gas), pick the simulation run
-  # whose full path is closest to the p-quantile curve across t_rel.
+select_temp_percentile_runs <- function(DT, group_cols, run_cols, probs, value_col = "Dtemp", rmse_window = 200) {
+  # Select percentile runs using Dtemp only, enforcing monotonic ordering:
+  # higher percentile trajectories must be >= lower percentile trajectories
+  # at every t_rel used for RMSE.
   key_cols <- c(group_cols, run_cols)
-  work <- DT[, c(key_cols, "t", "t_rel", value_col), with = FALSE]
+  work <- DT[t_rel >= 0 & t_rel <= rmse_window, c(key_cols, "t_rel", value_col), with = FALSE]
+  work <- work[!is.na(get(value_col))]
+  if (nrow(work) == 0) return(data.table())
 
-  best_list <- list()
-  traj_list <- list()
+  probs <- sort(unique(probs))
+  groups <- unique(work[, ..group_cols])
+  selected_all <- list()
 
-  for (p in probs) {
-    # 1) Build pointwise percentile target curve q_p(t_rel)
-    qcurve <- work[, .(
-      q_value = as.numeric(quantile(get(value_col), p, na.rm = TRUE, type = 8))
-    ), by = c(group_cols, "t_rel")]
+  for (g_i in seq_len(nrow(groups))) {
+    g <- groups[g_i]
+    wg <- work[g, on = group_cols, nomatch = 0L]
+    if (nrow(wg) == 0) next
 
-    # 2) Compute squared deviation from target at each time
-    dev <- merge(work, qcurve, by = c(group_cols, "t_rel"), all = FALSE)
-    dev[, sqe := (get(value_col) - q_value)^2]
+    run_traj <- wg[, .(value = get(value_col)), by = c(run_cols, "t_rel")]
+    setkeyv(run_traj, run_cols)
 
-    # 3) Collapse to one distance per run: RMSE over time
-    rmse <- dev[, .(rmse = sqrt(mean(sqe, na.rm = TRUE))), by = key_cols]
-    setorder(rmse, rmse)
-    # 4) Best run = minimum RMSE in each group
-    best <- rmse[, .SD[1], by = group_cols]
-    best[, `:=`(variable = value_col, percentile = p)]
+    chosen <- data.table()
 
-    # 5) Return full trajectory of selected run
-    traj <- merge(
-      work[, .(t, t_rel, value = get(value_col)), by = key_cols],
-      best[, c(key_cols, "variable", "percentile", "rmse"), with = FALSE],
-      by = key_cols,
-      all = FALSE
-    )
+    for (p in probs) {
+      qcurve <- wg[, .(q_value = as.numeric(quantile(get(value_col), p, na.rm = TRUE, type = 8))), by = "t_rel"]
+      dev <- merge(wg, qcurve, by = "t_rel", all = FALSE)
+      dev[, sqe := (get(value_col) - q_value)^2]
+      rmse_tbl <- dev[, .(rmse = sqrt(mean(sqe, na.rm = TRUE))), by = run_cols]
+      setorder(rmse_tbl, rmse)
 
-    best_list[[length(best_list) + 1]] <- best
-    traj_list[[length(traj_list) + 1]] <- traj
+      pick <- data.table()
+      for (cand_i in seq_len(nrow(rmse_tbl))) {
+        cand <- rmse_tbl[cand_i]
+        ok <- TRUE
+
+        if (nrow(chosen) > 0) {
+          cand_vals <- run_traj[cand, on = run_cols, nomatch = 0L][, .(t_rel, v_cand = value)]
+          for (prev_i in seq_len(nrow(chosen))) {
+            prev <- chosen[prev_i]
+            prev_vals <- run_traj[prev, on = run_cols, nomatch = 0L][, .(t_rel, v_prev = value)]
+            chk <- merge(cand_vals, prev_vals, by = "t_rel")
+            if (nrow(chk) == 0 || any(chk$v_cand < chk$v_prev - 1e-10, na.rm = TRUE)) {
+              ok <- FALSE
+              break
+            }
+          }
+        }
+
+        if (ok) {
+          pick <- copy(cand)
+          break
+        }
+      }
+
+      if (nrow(pick) == 0) {
+        pick <- rmse_tbl[1]
+        monotonic_ok <- FALSE
+      } else {
+        monotonic_ok <- TRUE
+      }
+
+      pick[, `:=`(percentile = p, monotonic_ok = monotonic_ok)]
+      chosen <- rbind(chosen, pick, use.names = TRUE, fill = TRUE)
+    }
+
+    chosen <- cbind(g[rep(1, nrow(chosen))], chosen)
+    selected_all[[length(selected_all) + 1]] <- chosen
   }
 
-  list(
-    best = rbindlist(best_list, use.names = TRUE, fill = TRUE),
-    traj = rbindlist(traj_list, use.names = TRUE, fill = TRUE)
-  )
+  rbindlist(selected_all, use.names = TRUE, fill = TRUE)
+}
+
+extract_selected_trajectories <- function(DT, selected_keys, value_col, group_cols, run_cols, variable_name) {
+  key_cols <- c(group_cols, run_cols)
+  base <- DT[, c(key_cols, "t", "t_rel", value_col), with = FALSE]
+  keys <- selected_keys[, c(key_cols, "percentile", "rmse", "monotonic_ok"), with = FALSE]
+  out <- merge(base, keys, by = key_cols, all = FALSE)
+  out[, `:=`(variable = variable_name, value = get(value_col))]
+  out
 }
 
 build_effects_pair <- function(TATM, tot_forcing, pulse_exp, base_exp, pair_label, temp_keys, forc_keys) {
@@ -213,32 +249,35 @@ build_effects_pair <- function(TATM, tot_forcing, pulse_exp, base_exp, pair_labe
 'Analyze pulse effects from Monte Carlo outputs and compute time-aligned statistics for two pairings: pulse-base and srmpulse-srm.
 
 Usage:
-  Analyze_montecarlo_pulse_effects.R [-o <results>] [--res <output_folder>] [--hpc <run_hpc>] [--traj_q <traj_q>] [--chunk <chunk>] [--plot <plot_results>]
+  Analyze_montecarlo_pulse_effects.R [-o <results>] [--res <output_folder>] [--hpc <run_hpc>] [--traj_q <traj_q>] [--chunk <chunk>] [--plot <plot_results>] [--rmse_window <rmse_window>]
 
 Options:
---res <results>        Results folder(s) with .gdx outputs. Separate multiple folders with -
--o <output_folder>     Output folder 
+-o <results>           Results folder(s) with .gdx outputs. Separate multiple folders with -
+--res <output_folder>  Output folder [default: Montecarlo]
 --hpc <run_hpc>        T/F if running on HPC 
 --traj_q <traj_q>      Comma-separated percentile(s) for coherent-run selection 
---chunk <chunk>        Number of matched scenario-groups processed per batch ì
---plot <plot_results>  T/F to generate plots 
+--chunk <chunk>        Number of matched scenario-groups processed per batch [default: 400]
+--plot <plot_results>  T/F to generate plots [default: T]
+--rmse_window <rmse_window>  Time window (years from pulse) used for RMSE and monotonic checks [default: 200]
 ' -> doc
 
 opts <- docopt(doc, version = "Analyze_montecarlo_pulse_effects")
 
-res <- ifelse(is.null(opts[["res"]]), "Results_montecarlo", as.character(opts[["res"]]))
+res <- ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts[["o"]]))
 res <- str_split(res, "-")[[1]]
-output_folder <- ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts[["o"]]))
+output_folder <- ifelse(is.null(opts[["res"]]), "Montecarlo", as.character(opts[["res"]]))
 run_hpc <- ifelse(is.null(opts[["hpc"]]), F, as.logical(opts[["hpc"]]))
 traj_q <- ifelse(is.null(opts[["traj_q"]]), "0.05,0.25,0.5,0.75,0.95", as.character(opts[["traj_q"]]))
 traj_probs <- as.numeric(trimws(str_split(traj_q, ",")[[1]]))
 chunk_n <- ifelse(is.null(opts[["chunk"]]), 400L, as.integer(opts[["chunk"]]))
 plot_results <- ifelse(is.null(opts[["plot"]]), T, as.logical(opts[["plot"]]))
+rmse_window <- ifelse(is.null(opts[["rmse_window"]]), 200, as.numeric(opts[["rmse_window"]]))
 if (any(is.na(traj_probs)) || any(traj_probs <= 0 | traj_probs >= 1)) {
   stop("--traj_q must contain numbers strictly between 0 and 1, e.g. 0.75 or 0.25,0.5,0.75")
 }
 if (is.na(chunk_n) || chunk_n <= 0) stop("--chunk must be a positive integer")
 if (is.na(plot_results)) stop("--plot must be T or F")
+if (is.na(rmse_window) || rmse_window <= 0) stop("--rmse_window must be a positive number")
 
 if (!dir.exists(output_folder)) dir.create(output_folder)
 if (any(!dir.exists(res))) stop("Some result folders do not exist")
@@ -324,6 +363,7 @@ output_files <- c(
   file.path(output_folder, "pulse_effects_stats_by_gas.csv"),
   file.path(output_folder, "pulse_effects_percentile_runs.csv"),
   file.path(output_folder, "pulse_effects_percentile_trajectories.csv"),
+  file.path(output_folder, "pulse_effects_srmminus_stats_by_gas.csv"),
   file.path(output_folder, "pulse_effects_srmminus_percentile_runs.csv"),
   file.path(output_folder, "pulse_effects_srmminus_percentile_trajectories.csv"),
   file.path(output_folder, "pulse_effects_srmminus_p50_trajectories.csv")
@@ -425,14 +465,29 @@ stats_by_gas <- rbindlist(list(
 ), use.names = TRUE, fill = TRUE)
 
 id_candidates <- c("pair", "gas", "rcp", "ecs", "tcr", "pulse_time", "cool_rate", "geo_start", "geo_end", "term")
-id_cols <- intersect(id_candidates, names(effects))
+selection_base <- effects[pair == "srmpulse-srm"]
+if (nrow(selection_base) == 0) selection_base <- effects
+
+id_cols <- intersect(id_candidates, names(selection_base))
 group_cols <- intersect(c("gas"), id_cols)
 run_cols <- setdiff(id_cols, group_cols)
 
-sel_temp <- select_percentile_runs(effects, "Dtemp", group_cols, run_cols, traj_probs)
-sel_forc <- select_percentile_runs(effects, "Dforc", group_cols, run_cols, traj_probs)
-selected_runs <- rbindlist(list(sel_temp$best, sel_forc$best), use.names = TRUE, fill = TRUE)
-selected_traj <- rbindlist(list(sel_temp$traj, sel_forc$traj), use.names = TRUE, fill = TRUE)
+# Select runs only with Dtemp, within rmse_window and monotonic percentile constraint.
+selected_runs <- select_temp_percentile_runs(
+  selection_base,
+  group_cols = group_cols,
+  run_cols = run_cols,
+  probs = traj_probs,
+  value_col = "Dtemp",
+  rmse_window = rmse_window
+)
+selected_runs[, variable := "Dtemp"]
+if (nrow(selected_runs) == 0) stop("No Dtemp percentile runs selected. Check input data and rmse_window.")
+
+# Project the same selected runs to Dtemp and Dforc trajectories for coherence.
+temp_traj <- extract_selected_trajectories(selection_base, selected_runs, "Dtemp", group_cols, run_cols, "Dtemp")
+forc_traj <- extract_selected_trajectories(selection_base, selected_runs, "Dforc", group_cols, run_cols, "Dforc")
+selected_traj <- rbindlist(list(temp_traj, forc_traj), use.names = TRUE, fill = TRUE)
 
 srm_plot_line <- data.table()
 srm_stats_by_gas <- data.table()
@@ -443,30 +498,38 @@ if (nrow(srm_masked) > 0) {
   id_cols_srm <- intersect(id_candidates, names(srm_masked))
   group_cols_srm <- intersect(c("gas"), id_cols_srm)
   run_cols_srm <- setdiff(id_cols_srm, group_cols_srm)
-  sel_srm <- select_percentile_runs(srm_masked, "SRMminus", group_cols_srm, run_cols_srm, traj_probs)
-  srm_selected_runs <- sel_srm$best
-  srm_selected_traj <- sel_srm$traj
-  srm_plot_line <- srm_selected_traj[t_rel < 200 & percentile == 0.5, .(gas, variable = "Dforc", t_rel, value)]
+  srm_keys_cols <- c(intersect(c(group_cols, run_cols), c(group_cols_srm, run_cols_srm)), "percentile", "rmse", "monotonic_ok")
+  srm_keys <- unique(selected_runs[, ..srm_keys_cols])
+  srm_selected_traj <- extract_selected_trajectories(srm_masked, srm_keys, "SRMminus", group_cols_srm, run_cols_srm, "SRMminus")
+  srm_selected_runs <- unique(srm_selected_traj[, c(srm_keys_cols, "variable"), with = FALSE])
+  srm_plot_line <- srm_selected_traj[t_rel < rmse_window & percentile == 0.5, .(gas, variable = "Dforc", t_rel, value)]
   srm_stats_by_gas <- quantile_summary(srm_masked, "SRMminus", c("gas", "t_rel"))
   srm_stats_by_gas[, variable := "Dforc"]
 }
 
 cat("Writing outputs...\n")
 fwrite(stats_by_gas, file = file.path(output_folder, "pulse_effects_stats_by_gas.csv"))
+fwrite(selected_runs, file = file.path(output_folder, "pulse_effects_percentile_runs.csv"))
 fwrite(selected_traj, file = file.path(output_folder, "pulse_effects_percentile_trajectories.csv"))
 if (nrow(srm_selected_runs) > 0) {
+  fwrite(srm_selected_runs, file = file.path(output_folder, "pulse_effects_srmminus_percentile_runs.csv"))
   fwrite(srm_stats_by_gas, file = file.path(output_folder, "pulse_effects_srmminus_stats_by_gas.csv"))
-  fwrite(srm_selected_traj, file = file.path(output_folder, "pulse_effects_srmminus_percentile_trajectories.csv")) }
+  fwrite(srm_selected_traj, file = file.path(output_folder, "pulse_effects_srmminus_percentile_trajectories.csv"))
+}
 
 if (plot_results) {
+  p_lo <- min(traj_probs)
+  p_hi <- max(traj_probs)
+  p_mid <- traj_probs[which.min(abs(traj_probs - 0.5))]
+
   plot_traj <- selected_traj[
-    t_rel < 200 & percentile %in% c(0.05, 0.5, 0.95),
+    t_rel < rmse_window & percentile %in% c(p_lo, p_mid, p_hi),
     .(gas, variable, t_rel, percentile, value)
   ]
 
-  plot_line <- plot_traj[percentile == 0.5]
+  plot_line <- plot_traj[percentile == p_mid]
   plot_ribbon <- dcast(
-    plot_traj[percentile %in% c(0.05, 0.95)],
+    plot_traj[percentile %in% c(p_lo, p_hi)],
     gas + variable + t_rel ~ percentile,
     value.var = "value"
   )
@@ -474,7 +537,7 @@ if (plot_results) {
   plot_stats <- ggplot2::ggplot() +
     ggplot2::geom_ribbon(
       data = plot_ribbon,
-      ggplot2::aes(x = t_rel, ymin = `0.05`, ymax = `0.95`, fill = gas),
+      ggplot2::aes(x = t_rel, ymin = .data[[as.character(p_lo)]], ymax = .data[[as.character(p_hi)]], fill = gas),
       alpha = 0.25,
       color = NA
     ) +
@@ -495,18 +558,18 @@ if (plot_results) {
   # Same figure using year-by-year percentiles (not coherent trajectories).
   plot_stats_yby <- ggplot2::ggplot() +
     ggplot2::geom_ribbon(
-      data = stats_by_gas[t_rel < 200],
+      data = stats_by_gas[t_rel < rmse_window],
       ggplot2::aes(x = t_rel, ymin = p05, ymax = p95, fill = gas),
       alpha = 0.25,
       color = NA
     ) +
     ggplot2::geom_line(
-      data = stats_by_gas[t_rel < 200],
+      data = stats_by_gas[t_rel < rmse_window],
       ggplot2::aes(x = t_rel, y = median, color = gas),
       linewidth = 0.8
     ) +
     ggplot2::geom_line(
-      data = srm_stats_by_gas[t_rel < 200],
+      data = srm_stats_by_gas[t_rel < rmse_window],
       ggplot2::aes(x = t_rel, y = -median, color = gas),
       linewidth = 0.8,
       linetype = "dashed"
