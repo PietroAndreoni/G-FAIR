@@ -30,7 +30,8 @@ fit_distribution <- function(distribution = "lognormal",
                              q95    = NULL,
                              probs_33_66 = c(0.33, 0.66),
                              probs_5_95  = c(0.05, 0.95),
-                             plot=F) {
+                             plot=F,
+                             return_params=F) {
   
   mu    <- NA_real_
   sigma <- NA_real_
@@ -144,10 +145,18 @@ fit_distribution <- function(distribution = "lognormal",
       (q5 & q95).")
     }
     
+    if (!is.finite(mu) || !is.finite(sigma) || sigma <= 0) {
+      stop("Invalid lognormal parameters inferred from inputs.")
+    }
+    
     # Implied stats for lognormal X
     out_mean   <- exp(mu + 0.5 * sigma^2)
     out_median <- exp(mu)
     out_sd     <- sqrt((exp(sigma^2) - 1) * exp(2 * mu + sigma^2))
+    
+    if (return_params==T) {
+      return(list(mu=mu, sigma=sigma, mean=out_mean, median=out_median, sd=out_sd))
+    }
     
     
     if (plot==T) {
@@ -223,9 +232,8 @@ fit_distribution <- function(distribution = "lognormal",
       mu    <- q5 - sigma * z1
       
     }  else {
-      stop("Not enough information for lognormal. Provide one of:
+      stop("Not enough information for normal. Provide one of:
       (mean & sd),
-      (mean & median),
       (median & sd),
       (median & q33 & q66),
       (median & q5 & q95),
@@ -233,10 +241,18 @@ fit_distribution <- function(distribution = "lognormal",
       (q5 & q95).")
     }
     
-    # Return also some implied summary stats for convenience
-    out_mean <- exp(mu + 0.5 * sigma^2)
-    out_median <- exp(mu)
-    out_sd <- sqrt((exp(sigma^2) - 1) * exp(2 * mu + sigma^2))
+    if (!is.finite(mu) || !is.finite(sigma) || sigma <= 0) {
+      stop("Invalid normal parameters inferred from inputs.")
+    }
+    
+    # Implied stats for normal X
+    out_mean <- mu
+    out_median <- mu
+    out_sd <- sigma
+    
+    if (return_params==T) {
+      return(list(mu=mu, sigma=sigma, mean=out_mean, median=out_median, sd=out_sd))
+    }
     
     
     if (plot==T) {
@@ -285,42 +301,63 @@ if (overwrite_data==T | !file.exists(paste0(res,"/id_montecarlo.csv"))) {
   }
   
 max_id <- nrow(data)
-  
-for (i in seq(1,n_scenarios,by=1)) {
-    # climate equilibrium sensitivity
-    ecs <- round(fit_distribution(median=3,q5=2,q95=5)*10,0)
-    
-    # tcr
-    tcr <- round(fit_distribution(median=1.8,q5=1,q95=2.5)*10,0)
-    
-    # rcp
-    rcp <- sample(c("RCP3PD","RCP45","RCP6","RCP85"),1)
-    
-    # time of the pulse
-    pt <- sample(c(5,10,20,30,40,50,60,70,80),1)
-    
-    # cooling rate 
-    cool <- sample(seq(0,40,by=5),1)
-    
-    # termination year 
-    term <- sample(seq(2300,2600,by=100),1)
-    
-    # start year 
-    start <- sample(seq(2025,2100,by=25),1)
-    
-    # time of termination event 
-    time_term <- sample(seq(10,500,by=10),1)
-    
-    data <- data %>% 
-      bind_rows(data.frame(ID=i+max_id,
-                           ecs=ecs,
-                           tcr=tcr,
-                           rcp=rcp,
-                           pulse=pt,
-                           cool=cool,
-                           term=term,
-                           start=start,
-                           term_delta=time_term) ) }
+
+# Joint lognormal sampling for climate parameters
+# as in FAIR v1.3
+# Target: Corr(ECS, TCR) = 0.81 on the original (non-log) scale
+ecs_par <- fit_distribution(median=3, q5=2, q95=5, return_params=T)
+tcr_par <- fit_distribution(median=1.8, q5=1.2, q95=2.4, return_params=T)
+rho_ecs_tcr <- 0.81
+rho_log <- log(1 + rho_ecs_tcr * sqrt((exp(ecs_par$sigma^2) - 1) * (exp(tcr_par$sigma^2) - 1))) /
+  (ecs_par$sigma * tcr_par$sigma)
+
+if (!is.finite(rho_log) || abs(rho_log) > 1) {
+  stop("Inconsistent ECS/TCR marginals and requested correlation (0.81).")
+}
+
+cov_matrix <- matrix(c(1, rho_log, rho_log, 1), nrow=2, byrow=TRUE)
+chol_cov <- chol(cov_matrix)
+n_draws <- n_scenarios
+
+draw_joint_ecs_tcr <- function(n) {
+  z_joint <- matrix(rnorm(2 * n), ncol=2) %*% chol_cov
+  list(
+    ecs = exp(ecs_par$mu + ecs_par$sigma * z_joint[,1]),
+    tcr = exp(tcr_par$mu + tcr_par$sigma * z_joint[,2])
+  )
+}
+
+joint_draw <- draw_joint_ecs_tcr(n_draws)
+ecs_draw <- joint_draw$ecs
+tcr_draw <- joint_draw$tcr
+
+# Enforce ecs > tcr for every stored realization (after rounding to tenths).
+invalid <- which(round(ecs_draw * 10, 0) <= round(tcr_draw * 10, 0))
+iter <- 0
+while (length(invalid) > 0) {
+  iter <- iter + 1
+  if (iter > 10000) {
+    stop("Unable to obtain n_draws with ecs > tcr after repeated redraws.")
+  }
+  redraw <- draw_joint_ecs_tcr(length(invalid))
+  ecs_draw[invalid] <- redraw$ecs
+  tcr_draw[invalid] <- redraw$tcr
+  invalid <- which(round(ecs_draw * 10, 0) <= round(tcr_draw * 10, 0))
+}
+
+new_data <- data.frame(
+  ID = max_id + seq_len(n_draws),
+  ecs = round(ecs_draw * 10, 0),
+  tcr = round(tcr_draw * 10, 0),
+  rcp = sample(c("RCP3PD","RCP45","RCP6","RCP85"), n_draws, replace=TRUE),
+  pulse = sample(c(5,10,20,30,40,50,60,70,80), n_draws, replace=TRUE),
+  cool = sample(seq(0,40,by=5), n_draws, replace=TRUE),
+  term = sample(seq(2300,2600,by=100), n_draws, replace=TRUE),
+  start = sample(seq(2025,2100,by=25), n_draws, replace=TRUE),
+  term_delta = sample(seq(10,500,by=10), n_draws, replace=TRUE)
+)
+
+data <- data %>% bind_rows(new_data)
   
 data <- data %>% 
     mutate(term_delta=pulse+term_delta,
