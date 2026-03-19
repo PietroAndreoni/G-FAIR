@@ -706,11 +706,30 @@ replace_num_na0(combined)
 combined[, cost := costpre + as.numeric(prob) * costpostterm + (1 - as.numeric(prob)) * costpostnoterm]
 combined[, c("costpre","costpostterm","costpostnoterm") := NULL]
 replace_num_na0(combined)
+if (nrow(combined) == 0L) {
+  stop(
+    paste0(
+      "No aggregated NPV rows were produced for chunk starting at ", n_chunk,
+      ". This usually means the matched GDX files for this chunk are incomplete or prepare_join_table() returned no joined rows."
+    )
+  )
+}
 combined_wide <- dcast(
   combined,
   formula = as.formula(paste(paste(all_names, collapse = " + "), "~ source")),
   value.var = "cost"
 )
+required_sources <- c("dirnpv", "srmpnpv", "ozpnpv", "masknpv", "damnpv")
+missing_sources <- setdiff(required_sources, names(combined_wide))
+if (length(missing_sources) > 0L) {
+  stop(
+    paste0(
+      "Missing aggregated cost columns after dcast for chunk starting at ", n_chunk,
+      ": ", paste(missing_sources, collapse = ", "),
+      ". This happens when one or more source categories are absent in the chunk input."
+    )
+  )
+}
 combined_wide <- merge(combined_wide, unique(pulse_size), by = intersect(names(combined_wide), names(pulse_size)), all.x = TRUE)
 combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / pulse_size]
 

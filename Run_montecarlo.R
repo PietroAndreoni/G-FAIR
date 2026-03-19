@@ -6,11 +6,11 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Run_montecarlo.R [-o <res>] [-l <load_data>] [-q <which_queue>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] 
+  Run_montecarlo.R [--res <res>] [-i <load_data>] [-q <which_queue>] [-m <max_scenarios>] [-x <rerun_problem>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--base <main_scenario>]
 
 Options:
--o <res>                     Path of the results (default: Results)
--l <load_data>               Path(s) and name of .csv with existing realizations 
+--res <res>                  Path of the results (default: Results)
+-i <load_data>               Path(s) and name of .csv with existing realizations 
 -p <run_parallel>            T/F if to run in parallel or in series (for Juno)
 -s <start_job>               Number of line to start calling the scenarios 
 -e <end_job>                 End of line to start calling the scenarios
@@ -18,6 +18,7 @@ Options:
 -m <max_scenarios>           Maximum scenarios to send to solve
 -x <rerun_problem>           T to avoid rerunning problematic scenarios (default)
 --hpc <run_hpc>              T/F if to run on Juno or local (windows)
+--base <main_scenario>       T/F to run the base scenario      
 ' -> doc
 
 library(docopt)
@@ -27,6 +28,7 @@ opts <- docopt(doc, version = 'Run_montecarlo')
 run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
 run_hpc = ifelse(is.null(opts[["hpc"]]), F, as.logical(opts["hpc"]) )
 rerun_problem = ifelse(is.null(opts[["x"]]),T, as.logical(opts["x"]) )
+main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
 
 # numeric
 max_scenarios = ifelse(is.null(opts[["m"]]), 100, as.numeric(opts["m"]) )
@@ -34,8 +36,8 @@ start_job = ifelse(is.null(opts[["s"]]), 1, as.numeric(opts["s"]) )
 end_job = ifelse(is.null(opts[["e"]]), 100000, as.numeric(opts["e"]) )
 
 # strings
-res = ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts["o"]) )
-input = ifelse(is.null(opts[["l"]]), "Montecarlo", as.character(opts["l"]) )
+res = ifelse(is.null(opts[["res"]]), "Results_montecarlo", as.character(opts["res"]) )
+input = ifelse(is.null(opts[["i"]]), "Montecarlo", as.character(opts["i"]) )
 which_queue = ifelse(is.null(opts[["q"]]), "p_short", as.character(opts["q"]) )
 
 # Make sure the file exists (create it if not)
@@ -58,14 +60,14 @@ filelist <- list.files(path=paste0(res,"/"),pattern="*.gdx")
 
 scenarios_launched <- 0
 problematic_data <- data.frame()
-gases <- c("ch4","co2")
-  
+if(main_scenario==T) gases <- c("ch4") else gases <- c("ch4","co2")
+
 for (i in seq(start_job,min(end_job,nrow(data))) ) {
   
 for (gas in gases) {
     
 bsub <- paste("bsub", "-q",which_queue, "-n 1",
-              "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 64G")
+              "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 2G")
 
 gams <- paste0("gams FAIR.gms --experiment=srm",
                " --gas=",gas,

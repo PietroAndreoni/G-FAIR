@@ -366,8 +366,10 @@ data <- data %>%
     unique()
   
 if (main_scenario==T) {
-    data <- data %>% 
-      mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=5 ) }
+    data <- rbind(data %>% 
+                    mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=5 ),
+                  data %>% 
+                    mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=30 ) ) }
   
 write.csv(data,file=paste0(res,"/id_montecarlo.csv")) 
 
