@@ -401,7 +401,7 @@ prepare_join_table <- function(filter_experiment) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-i <input>] [-o <results>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>] [--res <output_folder>]
+  Analyze_montecarlo.R [-i <input>] [-o <results>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>] [--angle <angle>] [--res <output_folder>]
 
 Options:
 -i <input>             Path where the montecarlo id are 
@@ -412,6 +412,7 @@ Options:
 --chunk <chunk>        how many scenarios to run together
 --skip <skip>          skip or rerun existing scenarios
 --base <main_scenario> T/F to run the base scenario      
+--angle <angle>        theta value for --base=T (default: 10; use na to keep theta uncertain)
 ' -> doc
 
 opts <- docopt(doc, version = 'Montecarlo')
@@ -438,6 +439,20 @@ seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 N = ifelse(is.null(opts[["chunk"]]), 100, as.integer(opts["chunk"]) )
 skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) ) 
 main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
+angle_opt = ifelse(is.null(opts[["angle"]]), "10", as.character(opts["angle"]))
+
+keep_theta_uncertain <- str_to_lower(str_trim(angle_opt)) == "na"
+if (!keep_theta_uncertain) {
+  base_theta <- suppressWarnings(as.numeric(angle_opt))
+  if (length(base_theta) != 1 || is.na(base_theta)) {
+    stop("--angle must be a number or 'na'")
+  }
+  if (base_theta < 0 || base_theta > 90) {
+    stop("--angle must be between 0 and 90, or 'na'")
+  }
+} else {
+  base_theta <- NA_real_
+}
 
 if(run_hpc==F) {igdx()} else {
   igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")
@@ -504,7 +519,7 @@ if (main_scenario == T) {
   id_montecarlo[, vsl := 10 * 1e6]
   id_montecarlo[, delta := 0.02]
   id_montecarlo[, vsl_eta := 1 ]
-  id_montecarlo[, theta := 10 ]
+  if (!keep_theta_uncertain) id_montecarlo[, theta := base_theta ]
 }
 
 all_names <- c("gas", names(id_montecarlo))

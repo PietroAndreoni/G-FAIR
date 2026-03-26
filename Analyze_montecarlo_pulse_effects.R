@@ -31,9 +31,10 @@ require_gdxtools()
 #    on relative time t_rel=t-pulse_time and save to disk.
 # 3) Reload compact tables and compute year-by-year quantiles by gas.
 # 4) Compute coherent percentile trajectories by selecting real runs
-#    from Dtemp only (with monotonic percentile constraint), then
-#    project the same selected runs onto Dforc and SRMminus.
-# 5) Overlay -SRM (from srmpulsemasked) on forcing panel and plot:
+#    separately for each variable (with monotonic percentile constraint).
+# 5) Overlay -SRM (from srmpulsemasked) on forcing panel using the
+#    forcing-selected runs.
+# 6) Plot:
 #    a) coherent-trajectory ribbons/median
 #    b) year-by-year ribbons/median
 # ------------------------------------------------------------------
@@ -82,8 +83,8 @@ quantile_summary <- function(DT, value_col, group_cols) {
   out
 }
 
-select_temp_percentile_runs <- function(DT, group_cols, run_cols, probs, value_col = "Dtemp", rmse_window = 200) {
-  # Select percentile runs using Dtemp only, enforcing monotonic ordering:
+select_percentile_runs <- function(DT, group_cols, run_cols, probs, value_col = "Dtemp", rmse_window = 200) {
+  # Select percentile runs using value_col, enforcing monotonic ordering:
   # higher percentile trajectories must be >= lower percentile trajectories
   # at every t_rel used for RMSE.
   key_cols <- c(group_cols, run_cols)
@@ -472,8 +473,9 @@ id_cols <- intersect(id_candidates, names(selection_base))
 group_cols <- intersect(c("gas"), id_cols)
 run_cols <- setdiff(id_cols, group_cols)
 
-# Select runs only with Dtemp, within rmse_window and monotonic percentile constraint.
-selected_runs <- select_temp_percentile_runs(
+# Select runs separately for Dtemp and Dforc, within rmse_window and with
+# monotonic percentile constraint inside each variable.
+temp_selected_runs <- select_percentile_runs(
   selection_base,
   group_cols = group_cols,
   run_cols = run_cols,
@@ -481,12 +483,24 @@ selected_runs <- select_temp_percentile_runs(
   value_col = "Dtemp",
   rmse_window = rmse_window
 )
-selected_runs[, variable := "Dtemp"]
-if (nrow(selected_runs) == 0) stop("No Dtemp percentile runs selected. Check input data and rmse_window.")
+temp_selected_runs[, variable := "Dtemp"]
+if (nrow(temp_selected_runs) == 0) stop("No Dtemp percentile runs selected. Check input data and rmse_window.")
 
-# Project the same selected runs to Dtemp and Dforc trajectories for coherence.
-temp_traj <- extract_selected_trajectories(selection_base, selected_runs, "Dtemp", group_cols, run_cols, "Dtemp")
-forc_traj <- extract_selected_trajectories(selection_base, selected_runs, "Dforc", group_cols, run_cols, "Dforc")
+forc_selected_runs <- select_percentile_runs(
+  selection_base,
+  group_cols = group_cols,
+  run_cols = run_cols,
+  probs = traj_probs,
+  value_col = "Dforc",
+  rmse_window = rmse_window
+)
+forc_selected_runs[, variable := "Dforc"]
+if (nrow(forc_selected_runs) == 0) stop("No Dforc percentile runs selected. Check input data and rmse_window.")
+
+selected_runs <- rbindlist(list(temp_selected_runs, forc_selected_runs), use.names = TRUE, fill = TRUE)
+
+temp_traj <- extract_selected_trajectories(selection_base, temp_selected_runs, "Dtemp", group_cols, run_cols, "Dtemp")
+forc_traj <- extract_selected_trajectories(selection_base, forc_selected_runs, "Dforc", group_cols, run_cols, "Dforc")
 selected_traj <- rbindlist(list(temp_traj, forc_traj), use.names = TRUE, fill = TRUE)
 
 srm_plot_line <- data.table()
@@ -499,7 +513,7 @@ if (nrow(srm_masked) > 0) {
   group_cols_srm <- intersect(c("gas"), id_cols_srm)
   run_cols_srm <- setdiff(id_cols_srm, group_cols_srm)
   srm_keys_cols <- c(intersect(c(group_cols, run_cols), c(group_cols_srm, run_cols_srm)), "percentile", "rmse", "monotonic_ok")
-  srm_keys <- unique(selected_runs[, ..srm_keys_cols])
+  srm_keys <- unique(forc_selected_runs[, ..srm_keys_cols])
   srm_selected_traj <- extract_selected_trajectories(srm_masked, srm_keys, "SRMminus", group_cols_srm, run_cols_srm, "SRMminus")
   srm_selected_runs <- unique(srm_selected_traj[, c(srm_keys_cols, "variable"), with = FALSE])
   srm_plot_line <- srm_selected_traj[t_rel < rmse_window & percentile == 0.5, .(gas, variable = "Dforc", t_rel, value)]
