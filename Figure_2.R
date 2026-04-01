@@ -291,7 +291,6 @@ void <- ggplot() + theme_void()
 fig2 <- (void + density_plot + void + plot_layout(widths = c(0.2,1,0.2)) ) / (dr + theta) / (ecs + alpha) + plot_layout(heights=c(1,0.6,0.6))
 
 ggsave("fig_2.png",fig2,width=12,height=12,dpi=300)
-ggsave("fig_3.png",fig3,width=12,height=6,dpi=300)
 ggsave("extfig_gsa.png",importances,width=12,height=6,dpi=300)
 ggsave("extfig_gsadiff.png",importance_diff,width=11,height=6,dpi=300)
 ggsave("extfig_fra.png",fraction,width=12,height=6,dpi=300)

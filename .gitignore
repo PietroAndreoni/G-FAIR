@@ -15,9 +15,15 @@
 
 Paper and figures/
 Results*/
+!Results_1903/
+!Results_base_1903_angle10/
+!Results_base_1903_angle30/
+!Results_base_1903_anglefree/
 Montecarlo*/
 225*/
 !input/*.gdx
 .Rproj.user
 
 *.svg
+
+*.gsp

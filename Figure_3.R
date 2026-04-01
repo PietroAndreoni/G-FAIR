@@ -10,7 +10,7 @@ igdx(dirname(Sys.which('gams'))) # Please have gams in your PATH!
 baseline <- read_parquet("input/data/harmsen_nonco2_baseline.lz4.parquet")
 macc <- read_parquet("input/data/harmsen_nonco2_macc.lz4.parquet")
 
-output_folder <- "Results_base_1903"
+output_folder <- "Results_base_1903_angle30"
 damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv)) 
 scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output")), read.csv)) %>% rename(scc=scc_nosrm)
 scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output")), read.csv)) %>% rename(scc_srm=scc)
@@ -138,7 +138,7 @@ fig3 <- ggplot() +
   scale_x_continuous(labels = ~paste(., ./25, sep = "\n"),
                      name = expression(atop("Abatement cost ($/ton" * CH[4] * ")",
                                             "Abatement cost ($/ton" * CO[2] * "eq)"))) #+ facet_wrap(year~.,)
-
+ggsave("fig_3.png",fig3,width=12,height=6,dpi=300)
 
 frac_damages <- damnpv %>% 
   pivot_longer(c(dirnpv,srmpnpv,ozpnpv,masknpv,damnpv),
