@@ -38,7 +38,7 @@ set box "boxes for co2 concentration module"
                                       "ocean mixed layer" /;
 
 set ghg "Greenhouse gases" /'co2', 'ch4', 'n2o', 'h2o', 'o3trop'/;
-set pre "Precursor gases (that are not ghgs)" /'co','no_x','nmvoc'/; 
+set pre "Precursor gases (that are not ghgs)" /'co','n_ox','nmvoc'/;
 set cghg(ghg) "Core greenhouse gases";
 set oghg(ghg) "Other well-mixed greenhouse gases with emission and concentration represenation";
 set preghg(ghg) "Other greenhouse gases without emission and concentration represenation";
@@ -66,7 +66,7 @@ SCALARS
         CO2toC          "CO2 to carbon conversion factor"                             /0.2727/
         Tecs            "equilbrium climate sensitivity (K)" /3.24/
         Ttcr            "Transient climate response (K)" /1.79/
-        forc2x          "Forcing for 2xCO2 (Wm-2)" /3.71/
+        forc2x          "Forcing for 2xCO2 (Wm-2)" /3.93/
         scaling_forc2x  "Scaling factor for CO2 forcing to ensure consistency with user-specified 2xforcing" /1.0/
         emi_2020            "Yearly emissions in 2020 (GtCO2)"
         cumemi_2020         "Initial cumulative emissions in 2020 (GtCO2)"      
@@ -76,7 +76,7 @@ SCALARS
         tfast0          "Initial temperature box 2 change in 2020 (K from 1765)"  /1.099454/
         tatm0           "Initial atmospheric temperature change in 2020"          /1.24715 /
         conv_frac       "Fraction of biogenic where the source is atmospheric CO2" /1/
-        oxi_frac        "Fraction of methane oxidized to CO2"                      /0.9/
+        oxi_frac        "Fraction of methane oxidized to CO2"                      /1/
         rmT             "Temperature sensitivity of decay time scaling factor for methane" /0.3/
         rmC             "Concentration sensitivity of decay time scaling factor for methane" / 0.00032 /;
  
@@ -107,8 +107,7 @@ VARIABLES
         W_EMI(ghg,t)   "Global missions of greenhouse gas i (GtCO2/MtCH4/MtN20 per year)"
         CONC(ghg,t)    "Concentration of greenhouse gas i (ppm/ppb from 1765)"
         FORCING(ghg,t) "Increase in radiative forcing due to ghg i (watts per m2 from 1765)"
-        CO2fromCH4(t)  "CO2 emissions from methane oxidation (GtC per year)"
-        CO2toCH4(t)    "CO2 converted to methane by biogenic processes (GtC per year)"
+        CO2fromCH4(t)  "net CO2 emitted from methane processes (GtC per year)"
         FF_CH4(t)      "Fraction of fossil methane emissions"
         RES(box,t)     "Carbon concentration in Reservoir i (GtC from 1765)"
         TATM(t)        "Increase temperature of atmosphere (degrees L from 1765)"     
@@ -136,7 +135,6 @@ EQUATIONS
         eq_cumemi           "Total emitted carbon"
         eq_csinks           "Accumulated carbon in sinks equation"
         eq_concghg          "Concentration equation for other GHGs"
-        eq_methoxi          "Methane oxidation equation"
         eq_methconv         "Methane conversion equation"
         eq_forcco2          "CO2 forcing equation"
         eq_forcch4          "CH4 forcing equation"
@@ -157,26 +155,25 @@ $batinclude "Model/parameters.gms"
 
 ** Four box model for CO2 emission-to-concentrations (FAIR formulation)
 eq_reslom(box,t+1)..       RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA('co2',t) ) ) +
-                                            emshare(box) * ( W_EMI('co2',t+1) + CO2fromCH4(t+1) - CO2toCH4(t+1) ) * emitoconc('co2') * tstep;
+                                            emshare(box) * ( W_EMI('co2',t+1) + CO2fromCH4(t+1) ) * emitoconc('co2') * tstep;
 
 eq_concco2(t)..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) );
 
 eq_catm(t)..               C_ATM(t)  =E=  CONC('co2',t) / emitoconc('co2');
         
-eq_cumemi(t+1)..           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + CO2fromCH4(t+1) - CO2toCH4(t+1) )*tstep;
+eq_cumemi(t+1)..           CUMEMI(t+1) =E=  CUMEMI(t) +  ( W_EMI('co2',t+1) + CO2fromCH4(t+1) )*tstep;
 
 eq_csinks(t)..             C_SINKS(t) =E=  CUMEMI(t) - ( C_ATM(t) -  catm_preindustrial );
     
 ** Single box model for non-CO2 GHGs  
 eq_concghg(ghg,t+1)$(not sameas(ghg,'co2') and not preghg(ghg))..      
                         CONC(ghg,t+1) =E= CONC(ghg,t) * exp(-tstep/(ALPHA(ghg,t) * taughg(ghg)) ) + 
-                        ( (  W_EMI(ghg,t+1) +   W_EMI(ghg,t) ) / 2 + natural_emissions(ghg,t+1) ) * emitoconc(ghg)  * tstep;
+                        ( (  W_EMI(ghg,t+1) + natural_emissions(ghg,t+1) +   W_EMI(ghg,t) + natural_emissions(ghg,t) ) / 2 ) * emitoconc(ghg)  * tstep;
 
-** conversion of CO2 into methane by biogenic processes (subtracted from CO2 emissions)
-eq_methconv(t)..        CO2toCH4(t) =E= conv_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * ( W_EMI('ch4',t) * ( 1- FF_CH4(t) ) + natural_emissions('ch4',t) );
-
-** methanize oxidation to CO2 (returning to CO2 emissions)
-eq_methoxi(t)..         CO2fromCH4(t) =E= oxi_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * sum(tt$(tt.val lt t.val and tt.val gt t.val - 100), (W_EMI('ch4',tt) + natural_emissions('ch4',tt))  * ( (1 - exp(-(t.val-tt.val)/(ALPHA('ch4',t)*taughg('ch4')) ) ) - (1 - exp(-((t.val-tstep)-tt.val)/(ALPHA('ch4',t)*taughg('ch4')) ) ) ) ) ;
+** exhange between atmospheric methane and co2: 
+* + conversion of CO2 into methane by biogenic processes (subtracted from CO2 emissions)
+* - methane oxidation to CO2 (returning to CO2 emissions)
+eq_methconv(t)..        CO2fromCH4(t) =E= oxi_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * sum(tt$(tt.val lt t.val and tt.val gt t.val - 100), (W_EMI('ch4',tt) + natural_emissions('ch4',tt))  * ( (1 - exp(-(t.val-tt.val)/(ALPHA('ch4',t)*taughg('ch4')) ) ) - (1 - exp(-((t.val-tstep)-tt.val)/(ALPHA('ch4',t)*taughg('ch4')) ) ) ) ) - conv_frac * 1e-3 * ghg_mm('co2') / ghg_mm('ch4') * ( W_EMI('ch4',t) * ( 1- FF_CH4(t) ) + natural_emissions('ch4',t) );
 
 ** forcing for the three main greenhouse gases (CO2, CH4, N2O) 
 eq_forcco2(t)..         FORCING('co2',t) =E=  ( -2.4e-7 * sqr( CONC('co2',t) - conc_preindustrial('co2') ) +
@@ -196,7 +193,7 @@ eq_forcn20(t)..         FORCING('n2o',t) =E=  ( -4.0e-6 * (CONC('co2',t) +  conc
 eq_forch2o(t)..         FORCING('h2o',t) =E= 0.12 * FORCING('ch4',t); 
 
 eq_forco3trop(t)..      FORCING('o3trop',t) =E= 1.74e-4 * (CONC('ch4',t) - conc_preindustrial('ch4')) +
-                                            9.08e-4 * (wemi_pre('no_x',t)-2) +
+                                            9.08e-4 * (wemi_pre('n_ox',t)-2) +
                                             8.51e-5 * (wemi_pre('co',t)-170) +
                                             2.25e-4 * (wemi_pre('nmvoc',t)-5) +
                                             ( 0.032 * (exp(-1.35*(TATM(t)) ) - 1) - sqrt( sqr(0.032 * (exp(-1.35*(TATM(t))) - 1) ) + sqr(1e-8)) ) / 2   ;
