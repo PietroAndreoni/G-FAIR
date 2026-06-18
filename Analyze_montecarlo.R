@@ -97,244 +97,11 @@ npv_aggregator <- function(DT, keep_names = all_names) {
   return(res_long)
 }
 
-fit_distribution <- function(distribution = "lognormal",
-                                       n =1, #number of required realizations
-                                       median = NULL,
-                                       mean   = NULL,
-                                       sd     = NULL,
-                                       q33    = NULL,
-                                       q66    = NULL,
-                                       q5     = NULL,
-                                       q95    = NULL,
-                                       probs_33_66 = c(0.33, 0.66),
-                                       probs_5_95  = c(0.05, 0.95),
-                                       plot=F) {
-
-  mu    <- NA_real_
-  sigma <- NA_real_
-  
-  if (distribution == "lognormal") {
-    # Helper to check positivity (lognormal only makes sense for > 0)
-    check_pos <- function(x, name) {
-      if (!is.null(x) && any(x <= 0)) {
-        stop(name, " must be > 0 for a lognormal distribution.")
-      }
-    }
-    
-    check_pos(median, "median")
-    check_pos(mean,   "mean")
-    check_pos(sd,     "sd")
-    check_pos(q33,    "q33")
-    check_pos(q66,    "q66")
-    check_pos(q5,     "q5")
-    check_pos(q95,    "q95")
-    
-    ## 1) Case: mean and sd of X
-    if (!is.null(mean) && !is.null(sd)) {
-      if (sd <= 0) stop("sd must be > 0.")
-      v      <- sd^2
-      sigma2 <- log(1 + v / mean^2)
-      if (sigma2 <= 0) stop("Inconsistent mean and sd for a lognormal.")
-      sigma  <- sqrt(sigma2)
-      mu     <- log(mean) - 0.5 * sigma2
-      
-      ## 2) Case: mean and median of X
-    } else if (!is.null(mean) && !is.null(median)) {
-      mu     <- log(median)
-      sigma2 <- 2 * (log(mean) - mu)
-      if (sigma2 <= 0) stop("Inconsistent mean and median for a lognormal.")
-      sigma  <- sqrt(sigma2)
-      
-      ## 3) NEW: median and sd of X
-    } else if (!is.null(median) && !is.null(sd)) {
-      if (sd <= 0) stop("sd must be > 0.")
-      mu <- log(median)
-      v  <- sd^2
-      
-      # For a lognormal:
-      # var = (exp(sigma^2) - 1) * exp(2*mu + sigma^2)
-      # Let t = exp(sigma^2); then var = (t - 1) * t * exp(2*mu)
-      # => (t^2 - t) = var / exp(2*mu)
-      # Solve t^2 - t - A = 0, where A = var / median^2
-      A    <- v / median^2
-      disc <- 1 + 4 * A
-      t    <- (1 + sqrt(disc)) / 2   # positive root
-      sigma2 <- log(t)
-      if (sigma2 <= 0) stop("Inconsistent median and sd for a lognormal.")
-      sigma  <- sqrt(sigma2)
-      
-      ## 4) Case: median and 33–66% quantiles
-    } else if (!is.null(median) && !is.null(q33) && !is.null(q66)) {
-      mu <- log(median)
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      sigma_33 <- (log(q33) - mu) / z1
-      sigma_66 <- (log(q66) - mu) / z2
-      sigma    <- mean(c(sigma_33, sigma_66))
-      
-      ## 5) Case: median and 5–95% quantiles
-    } else if (!is.null(median) && !is.null(q5) && !is.null(q95)) {
-      mu <- log(median)
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      sigma_5  <- (log(q5)  - mu) / z1
-      sigma_95 <- (log(q95) - mu) / z2
-      sigma    <- mean(c(sigma_5, sigma_95))
-      
-      ## 6) Case: 33–66% quantiles only
-    } else if (!is.null(q33) && !is.null(q66)) {
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      L1 <- log(q33)
-      L2 <- log(q66)
-      
-      sigma <- (L2 - L1) / (z2 - z1)
-      mu    <- L1 - sigma * z1
-      
-      ## 7) Case: 5–95% quantiles only
-    } else if (!is.null(q5) && !is.null(q95)) {
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      L1 <- log(q5)
-      L2 <- log(q95)
-      
-      sigma <- (L2 - L1) / (z2 - z1)
-      mu    <- L1 - sigma * z1
-      
-    } else {
-      stop("Not enough information for lognormal. Provide one of:
-      (mean & sd),
-      (mean & median),
-      (median & sd),
-      (median & q33 & q66),
-      (median & q5 & q95),
-      (q33 & q66), or
-      (q5 & q95).")
-    }
-    
-    # Implied stats for lognormal X
-    out_mean   <- exp(mu + 0.5 * sigma^2)
-    out_median <- exp(mu)
-    out_sd     <- sqrt((exp(sigma^2) - 1) * exp(2 * mu + sigma^2))
-
-    
-    if (plot==T) {
-      draws <- rlnorm(n = 10000, mu, sigma)
-      print(paste("mean: ",round(mean(draws),5) ) )
-      print(paste("median: ",round(median(draws), 5) ) )
-      print(paste("std: ",round(sd(draws), 5) ) )
-      print(paste("66%: ",round(quantile(draws,0.66), 5) ) )
-      print(paste("33%: ",round(quantile(draws,0.33), 5) ) )
-      print(paste("95%: ",round(quantile(draws,0.95), 5) ) )
-      print(paste("5%: ",round(quantile(draws,0.05), 5) ) )
-      plot(density(draws[draws > 0 & draws < 10*sd(draws)])) }
-    
-    return(rlnorm(n, mu, sigma)) 
-    
-    
-  } else if (distribution == "normal") {
-    
-    if (!is.null(sd) && sd <= 0) stop("sd must be > 0.")
-    
-    ## 1) mean & sd
-    if (!is.null(mean) && !is.null(sd)) {
-      mu    <- mean
-      sigma <- sd
-      
-      ## 2) median & sd
-    } else if (!is.null(median) && !is.null(sd)) {
-      mu    <- median
-      sigma <- sd
-      
-      ## 3) median and 33–66% quantiles
-    } else if (!is.null(median) && !is.null(q33) && !is.null(q66)) {
-      mu <- median
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma_33 <- (q33 - mu) / z1
-      sigma_66 <- (q66 - mu) / z2
-      sigma    <- mean(c(sigma_33, sigma_66))
-      
-      ## 4) median and 5–95% quantiles
-    } else if (!is.null(median) && !is.null(q5) && !is.null(q95)) {
-      mu <- median
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma_5  <- (q5  - mu) / z1
-      sigma_95 <- (q95 - mu) / z2
-      sigma    <- mean(c(sigma_5, sigma_95))
-      
-      ## 5) 33–66% quantiles only
-    } else if (!is.null(q33) && !is.null(q66)) {
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma <- (q66 - q33) / (z2 - z1)
-      mu    <- q33 - sigma * z1
-      
-      ## 6) 5–95% quantiles only
-    } else if (!is.null(q5) && !is.null(q95)) {
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma <- (q95 - q5) / (z2 - z1)
-      mu    <- q5 - sigma * z1
-      
-    }  else {
-        stop("Not enough information for lognormal. Provide one of:
-      (mean & sd),
-      (mean & median),
-      (median & sd),
-      (median & q33 & q66),
-      (median & q5 & q95),
-      (q33 & q66), or
-      (q5 & q95).")
-      }
-    
-    # Return also some implied summary stats for convenience
-    out_mean <- exp(mu + 0.5 * sigma^2)
-    out_median <- exp(mu)
-    out_sd <- sqrt((exp(sigma^2) - 1) * exp(2 * mu + sigma^2))
-    
-    
-    if (plot==T) {
-      draws <- rnorm(n = 10000, mu, sigma)
-      print(paste("mean: ",round(mean(draws),5) ) )
-      print(paste("median: ",round(median(draws), 5) ) )
-      print(paste("std: ",round(sd(draws), 5) ) )
-      print(paste("66%: ",round(quantile(draws,0.66), 5) ) )
-      print(paste("33%: ",round(quantile(draws,0.33), 5) ) )
-      print(paste("95%: ",round(quantile(draws,0.95), 5) ) )
-      print(paste("5%: ",round(quantile(draws,0.05), 5) ) )
-      plot(density(draws[draws > 0 & draws < 10*sd(draws)])) }
-    
-    return(rnorm(n, mu, sigma)) 
-    
-    
-    }  else {stop("choose normal or lognormal distribution")}
-      
-}
-    
+# NOTE: the post-processing uncertainties (theta, alpha, delta, prob,
+# mortality_srm, forctoTg, TgtoUSD, mortality_ozone, vsl, vsl_eta, dg) are no
+# longer sampled here. They are drawn once (via Sobol) in Generate_montecarlo.R
+# and read from id_montecarlo.csv below. The fit_distribution() helper therefore
+# lives only in Generate_montecarlo.R now.
 
 prepare_join_table <- function(filter_experiment) {
   
@@ -393,7 +160,9 @@ prepare_join_table <- function(filter_experiment) {
   replace_num_na0(base)
   base[, term := NULL] # remove term (readded later)
   base <- merge(base,all_scenarios[!is.na(term)], by = setdiff(scenario_names,c("term")), allow.cartesian = TRUE)
-  base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("gas")))
+  # allow.cartesian: several realizations may share the same FAIR scenario (and
+  # thus the same gdx) while differing in the post-processing parameters.
+  base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("gas")), allow.cartesian = TRUE)
   return(base)
 }
 
@@ -401,18 +170,16 @@ prepare_join_table <- function(filter_experiment) {
 'Launch script to analyze montecarlo scenarios (produces a csv file in the same folder)
 
 Usage:
-  Analyze_montecarlo.R [-i <input>] [-o <results>] [--hpc <run_hpc>] [-p <plot_results>] [--seed <seed>] [--chunk <chunk>] [--skip <skip>] [--base <main_scenario>] [--angle <angle>] [--res <output_folder>]
+  Analyze_montecarlo.R [-i <input>] [-o <results>] [--hpc <run_hpc>] [-p <plot_results>] [--chunk <chunk>] [--skip <skip>] [--res <output_folder>] [--termination <termination>]
 
 Options:
--i <input>             Path where the montecarlo id are 
+-i <input>             Path where the montecarlo id are
 -o <results>           Where to save results
 --res <output_folder>  name of the output folder (default: Results_montecarlo). For multiple folders separate with -
---hpc <run_hpc>        T/F if running from Juno (T) or local (F) 
---seed <seed>          seed number (for reproducibility)
+--hpc <run_hpc>        T/F if running from Juno (T) or local (F)
 --chunk <chunk>        how many scenarios to run together
 --skip <skip>          skip or rerun existing scenarios
---base <main_scenario> T/F to run the base scenario      
---angle <angle>        theta value for --base=T (default: 10; use na to keep theta uncertain)
+--termination <termination>  T: NPC of the terminated run (SRM off at term_delta); F: NPC of the run where SRM is never terminated (default T)
 ' -> doc
 
 opts <- docopt(doc, version = 'Montecarlo')
@@ -423,7 +190,14 @@ res <- str_split(res,"-")[[1]]
 input_folder <- ifelse(is.null(opts[["i"]]), "Montecarlo", as.character(opts["i"]) )
 output_folder <- ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o"]) )
 
-name_output <- "npc_output.csv"
+# Which world to price: the terminated run (SRM switched off at the realization's
+# term_delta) or the run where SRM is never terminated. Termination probability
+# is NOT applied here -- it is embedded in the frequency of termination times
+# drawn in Generate_montecarlo.R (term_delta ~ geometric hazard; a draw at the
+# FAIR horizon = no termination within the run). Distinct output names so the two
+# modes don't append into the same file.
+run_termination = ifelse(is.null(opts[["termination"]]), T, as.logical(opts["termination"]) )
+name_output <- if (run_termination) "npc_output.csv" else "npc_noterm_output.csv"
 
 
 # Make sure the output folder exists (create it if not)
@@ -435,24 +209,8 @@ if (any(!dir.exists(res)) ) stop("some of the folder specified do not exsist")
 if (!dir.exists(input_folder) ) stop("no id folder")
 
 run_hpc = ifelse(is.null(opts[["hpc"]]), F, as.logical(opts["hpc"]) )
-seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 N = ifelse(is.null(opts[["chunk"]]), 100, as.integer(opts["chunk"]) )
-skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) ) 
-main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
-angle_opt = ifelse(is.null(opts[["angle"]]), "10", as.character(opts["angle"]))
-
-keep_theta_uncertain <- str_to_lower(str_trim(angle_opt)) == "na"
-if (!keep_theta_uncertain) {
-  base_theta <- suppressWarnings(as.numeric(angle_opt))
-  if (length(base_theta) != 1 || is.na(base_theta)) {
-    stop("--angle must be a number or 'na'")
-  }
-  if (base_theta < 0 || base_theta > 90) {
-    stop("--angle must be between 0 and 90, or 'na'")
-  }
-} else {
-  base_theta <- NA_real_
-}
+skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) )
 
 if(run_hpc==F) {igdx()} else {
   igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")
@@ -484,43 +242,33 @@ id_list <- lapply(input_folder, function(folder) {
 })
 id_montecarlo <- rbindlist(id_list, fill = TRUE)
 setDT(id_montecarlo)
-# select, mutate types & rename as original script
-keep_cols <- c("ecs","tcr","rcp","pulse","cool","term","start","term_delta")
-if (!all(keep_cols %in% names(id_montecarlo))) stop("id_montecarlo csv missing columns")
-id_montecarlo <- id_montecarlo[, .(ecs, tcr, rcp, pulse, cool, term, start, term_delta)]
-# mutate/rename
-id_montecarlo[, term := as.integer(term)]
-# convert integer columns to character as in original
-int_cols <- names(id_montecarlo)[vapply(id_montecarlo, is.integer, logical(1))]
-for (cname in int_cols) id_montecarlo[, (cname) := as.character(get(cname))]
-id_montecarlo[, rcp := str_remove(rcp, "RCP")]
+# The FAIR (scenario) parameters drive a FAIR run and are encoded in the gdx
+# file names; the post-processing parameters are now sampled once in
+# Generate_montecarlo.R and read here straight from id_montecarlo.csv.
+fair_cols <- c("ecs","tcr","rcp","pulse","cool","term","start","term_delta")
+post_cols <- c("theta","alpha","delta","prob","mortality_srm","forctoTg",
+               "TgtoUSD","mortality_ozone","vsl","vsl_eta","dg")
+missing_cols <- setdiff(c(fair_cols, post_cols), names(id_montecarlo))
+if (length(missing_cols) > 0) {
+  stop("id_montecarlo csv missing columns: ", paste(missing_cols, collapse=", "),
+       ". Regenerate it with the current Generate_montecarlo.R.")
+}
+id_montecarlo <- id_montecarlo[, c(fair_cols, post_cols), with = FALSE]
+
+# FAIR/scenario columns are matched against the gdx file names as strings.
+for (cname in setdiff(fair_cols, "rcp")) {
+  id_montecarlo[, (cname) := as.character(as.integer(round(as.numeric(get(cname)))))]
+}
+id_montecarlo[, rcp := str_remove(as.character(rcp), "RCP")]
+# Post-processing columns stay numeric for the cost/damage computations.
+for (cname in post_cols) id_montecarlo[, (cname) := as.numeric(get(cname))]
 setnames(id_montecarlo, c("pulse","cool","term_delta","start","term"), c("pulse_time","cool_rate","term","geo_start","geo_end"))
 id_montecarlo <- unique(id_montecarlo)
 
-cat("Proucing montecarlo realizations... \n")
-n_scenarios <- nrow(id_montecarlo)
-set.seed(seed)
-# add uncertainties
-id_montecarlo[, theta := pmin(90, round(fit_distribution(median=10,q5=3,q95=30,n=n_scenarios),0) )]
-id_montecarlo[, alpha := round(fit_distribution(median=0.00575,sd=0.00575*382/179,n=n_scenarios),4)]
-id_montecarlo[, delta := round(runif(n_scenarios,0.01,0.07),2)]
-id_montecarlo[, prob := round(runif(n_scenarios,0,1),1)]
-id_montecarlo[, mortality_srm := round( pmax(0,fit_distribution(median=7400,q5=2300,q95=16000,n=n_scenarios),0) ) ]
-id_montecarlo[, forctoTg := round( 1/runif(n_scenarios,0.2,1.5),2)]
-id_montecarlo[, TgtoUSD := round( runif(n_scenarios, 0.75, 3),2)]
-# from https://pmc.ncbi.nlm.nih.gov/articles/instance/10631284/bin/NIHMS1940316-supplement-SI.pdf 
-# mortality / 100 ppb pulse of methane 
-id_montecarlo[, mortality_ozone := round( pmax(0, fit_distribution(distribution="normal",median=11250,q5=5000,q95=17500,n=n_scenarios) / 100, 0) ) ]
-id_montecarlo[, vsl := round(runif(n_scenarios,7.5,13.6),0) * 1e6]
-id_montecarlo[, vsl_eta := round(runif(n_scenarios,0.4,1),1) ]
-id_montecarlo[, dg := round(fit_distribution(distribution="normal",median=0.015,sd=0.005,n=n_scenarios),3)]
+cat("Loaded", nrow(id_montecarlo), "montecarlo realizations from id_montecarlo.csv \n")
 
-if (main_scenario == T) {
-  id_montecarlo[, vsl := 10 * 1e6]
-  id_montecarlo[, delta := 0.02]
-  id_montecarlo[, vsl_eta := 1 ]
-  if (!keep_theta_uncertain) id_montecarlo[, theta := base_theta ]
-}
+# Post-processing parameters (incl. the deterministic main-scenario overrides
+# for vsl/delta/vsl_eta/theta) are sampled and fixed in Generate_montecarlo.R.
 
 all_names <- c("gas", names(id_montecarlo))
 
@@ -584,7 +332,7 @@ for (n_chunk in seq(1,nrow(all_experiments), by = N+1 )) {
   ## 1) srmpulsemaskedterm: match on all scenario columns
   f1 <- dt_srmpt[exp_row, on = k_all, mult = "first"]$gdx
   
-  ## 2–4) srmpulsemasked / srmpulse / srm: drop term
+  ## 2-4) srmpulsemasked / srmpulse / srm: drop term
   exp_no_term <- exp_row[, ..k_no_term]
   
   f2 <- dt_srmptm[exp_no_term, on = k_no_term, mult = "first"]$gdx
@@ -652,17 +400,14 @@ tot_forcing <- FORC[, .(value = sum(value)), by = c("t", "file",scenario_names, 
 
 cat("Analyzing the data... \n")
 
-# build and aggregate for pre, post_noterm, post_term using above functions
-dt_noterm <- prepare_join_table("srmpulsemasked")
-dt_pre <- dt_noterm[ t >= as.numeric(pulse_time) & t <= as.numeric(term) ]
-res_pre <- npv_aggregator(dt_pre, all_names)
-
-dt_post_noterm <- dt_noterm[ t >= as.numeric(pulse_time) & t > as.numeric(term) ]
-res_post_noterm <- npv_aggregator(dt_post_noterm, all_names)
-
-dt_term <- prepare_join_table("srmpulsemaskedterm")
-dt_post_term <- dt_term[ t >= as.numeric(pulse_time) & t > as.numeric(term) ]
-res_post_term <- npv_aggregator(dt_post_term, all_names)
+# NPC of a single world over the whole post-deployment horizon [pulse_time, 480]:
+# either the terminated run (srmpulsemaskedterm: SRM off for t > term_delta) or
+# the run where SRM is never terminated (srmpulsemasked). No probability blend --
+# the termination distribution is already carried by the term_delta draws.
+selected_experiment <- if (run_termination) "srmpulsemaskedterm" else "srmpulsemasked"
+dt_sel <- prepare_join_table(selected_experiment)
+dt_sel <- dt_sel[ t >= as.numeric(pulse_time) ]
+res_sel <- npv_aggregator(dt_sel, all_names)
 
 # pulse_size & scc (reuse earlier approach but modularized)
 pulse_size <- W_EMI[ ghg == gas & experiment %in% c("srm","srmpulse"), .(t, value, experiment, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)]
@@ -713,13 +458,8 @@ scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time",
 scc_agg2[, scc_nosrm := (damnpv + ozpnpv) / pulse_size]
 scc_agg2 <- unique(scc_agg2)
 
-# combine results
-combined <- merge(res_pre[, c(all_names,"source" ,"cost"), with = FALSE], res_post_noterm[, c(all_names,"source" ,"cost"), with = FALSE], by = c(all_names,"source"), all = TRUE, suffixes = c("_pre","_postnoterm"))
-combined <- merge(combined, res_post_term[, c(all_names, "source" ,"cost"), with = FALSE], by = c(all_names,"source"), all = TRUE)
-setnames(combined, c("cost_pre","cost_postnoterm","cost"), c("costpre","costpostnoterm","costpostterm"))
-replace_num_na0(combined)
-combined[, cost := costpre + as.numeric(prob) * costpostterm + (1 - as.numeric(prob)) * costpostnoterm]
-combined[, c("costpre","costpostterm","costpostnoterm") := NULL]
+# combine results: a single experiment's NPC, no probability weighting
+combined <- res_sel[, c(all_names, "source", "cost"), with = FALSE]
 replace_num_na0(combined)
 if (nrow(combined) == 0L) {
   stop(

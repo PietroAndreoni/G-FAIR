@@ -6,7 +6,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Generate_montecarlo.R [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--base <main_scenario>] 
+  Generate_montecarlo.R [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--base <main_scenario>] [--angle <angle>] [--method <sampling_method>] [--seed <seed>] [--diagnostics <diagnostics>]
 
 Options:
 -o <res>                     Path of the input/outputs
@@ -14,268 +14,27 @@ Options:
 -w <overwrite_data>          T/F to overwrite old realizations
 --seed <seed>                seed number (for reproducibility)
 --base <main_scenario>       T/F if to run the main scenario only (no montecarlo over policy parameters)
+--angle <angle>              theta value for --base=T (default: 10; use na to keep theta uncertain)
+--method <sampling_method>   "sobol" (quasi-random, default) or "montecarlo" (pseudo-random)
+--diagnostics <diagnostics>  T/F write a PDF comparing the drawn vs theoretical distributions (default F)
 ' -> doc
 
 library(docopt)
 opts <- docopt(doc, version = 'Generate_montecarlo')
 
-fit_distribution <- function(distribution = "lognormal",
-                             n =1, #number of required realizations
-                             median = NULL,
-                             mean   = NULL,
-                             sd     = NULL,
-                             q33    = NULL,
-                             q66    = NULL,
-                             q5     = NULL,
-                             q95    = NULL,
-                             probs_33_66 = c(0.33, 0.66),
-                             probs_5_95  = c(0.05, 0.95),
-                             plot=F,
-                             return_params=F) {
-  
-  mu    <- NA_real_
-  sigma <- NA_real_
-  
-  if (distribution == "lognormal") {
-    # Helper to check positivity (lognormal only makes sense for > 0)
-    check_pos <- function(x, name) {
-      if (!is.null(x) && any(x <= 0)) {
-        stop(name, " must be > 0 for a lognormal distribution.")
-      }
-    }
-    
-    check_pos(median, "median")
-    check_pos(mean,   "mean")
-    check_pos(sd,     "sd")
-    check_pos(q33,    "q33")
-    check_pos(q66,    "q66")
-    check_pos(q5,     "q5")
-    check_pos(q95,    "q95")
-    
-    ## 1) Case: mean and sd of X
-    if (!is.null(mean) && !is.null(sd)) {
-      if (sd <= 0) stop("sd must be > 0.")
-      v      <- sd^2
-      sigma2 <- log(1 + v / mean^2)
-      if (sigma2 <= 0) stop("Inconsistent mean and sd for a lognormal.")
-      sigma  <- sqrt(sigma2)
-      mu     <- log(mean) - 0.5 * sigma2
-      
-      ## 2) Case: mean and median of X
-    } else if (!is.null(mean) && !is.null(median)) {
-      mu     <- log(median)
-      sigma2 <- 2 * (log(mean) - mu)
-      if (sigma2 <= 0) stop("Inconsistent mean and median for a lognormal.")
-      sigma  <- sqrt(sigma2)
-      
-      ## 3) NEW: median and sd of X
-    } else if (!is.null(median) && !is.null(sd)) {
-      if (sd <= 0) stop("sd must be > 0.")
-      mu <- log(median)
-      v  <- sd^2
-      
-      # For a lognormal:
-      # var = (exp(sigma^2) - 1) * exp(2*mu + sigma^2)
-      # Let t = exp(sigma^2); then var = (t - 1) * t * exp(2*mu)
-      # => (t^2 - t) = var / exp(2*mu)
-      # Solve t^2 - t - A = 0, where A = var / median^2
-      A    <- v / median^2
-      disc <- 1 + 4 * A
-      t    <- (1 + sqrt(disc)) / 2   # positive root
-      sigma2 <- log(t)
-      if (sigma2 <= 0) stop("Inconsistent median and sd for a lognormal.")
-      sigma  <- sqrt(sigma2)
-      
-      ## 4) Case: median and 33–66% quantiles
-    } else if (!is.null(median) && !is.null(q33) && !is.null(q66)) {
-      mu <- log(median)
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      sigma_33 <- (log(q33) - mu) / z1
-      sigma_66 <- (log(q66) - mu) / z2
-      sigma    <- mean(c(sigma_33, sigma_66))
-      
-      ## 5) Case: median and 5–95% quantiles
-    } else if (!is.null(median) && !is.null(q5) && !is.null(q95)) {
-      mu <- log(median)
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      sigma_5  <- (log(q5)  - mu) / z1
-      sigma_95 <- (log(q95) - mu) / z2
-      sigma    <- mean(c(sigma_5, sigma_95))
-      
-      ## 6) Case: 33–66% quantiles only
-    } else if (!is.null(q33) && !is.null(q66)) {
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      L1 <- log(q33)
-      L2 <- log(q66)
-      
-      sigma <- (L2 - L1) / (z2 - z1)
-      mu    <- L1 - sigma * z1
-      
-      ## 7) Case: 5–95% quantiles only
-    } else if (!is.null(q5) && !is.null(q95)) {
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      L1 <- log(q5)
-      L2 <- log(q95)
-      
-      sigma <- (L2 - L1) / (z2 - z1)
-      mu    <- L1 - sigma * z1
-      
-    } else {
-      stop("Not enough information for lognormal. Provide one of:
-      (mean & sd),
-      (mean & median),
-      (median & sd),
-      (median & q33 & q66),
-      (median & q5 & q95),
-      (q33 & q66), or
-      (q5 & q95).")
-    }
-    
-    if (!is.finite(mu) || !is.finite(sigma) || sigma <= 0) {
-      stop("Invalid lognormal parameters inferred from inputs.")
-    }
-    
-    # Implied stats for lognormal X
-    out_mean   <- exp(mu + 0.5 * sigma^2)
-    out_median <- exp(mu)
-    out_sd     <- sqrt((exp(sigma^2) - 1) * exp(2 * mu + sigma^2))
-    
-    if (return_params==T) {
-      return(list(mu=mu, sigma=sigma, mean=out_mean, median=out_median, sd=out_sd))
-    }
-    
-    
-    if (plot==T) {
-      draws <- rlnorm(n = 10000, mu, sigma)
-      print(paste("mean: ",round(mean(draws),5) ) )
-      print(paste("median: ",round(median(draws), 5) ) )
-      print(paste("std: ",round(sd(draws), 5) ) )
-      print(paste("66%: ",round(quantile(draws,0.66), 5) ) )
-      print(paste("33%: ",round(quantile(draws,0.33), 5) ) )
-      print(paste("95%: ",round(quantile(draws,0.95), 5) ) )
-      print(paste("5%: ",round(quantile(draws,0.05), 5) ) )
-      plot(density(draws[draws > 0 & draws < 10*sd(draws)])) }
-    
-    return(rlnorm(n, mu, sigma)) 
-    
-    
-  } else if (distribution == "normal") {
-    
-    if (!is.null(sd) && sd <= 0) stop("sd must be > 0.")
-    
-    ## 1) mean & sd
-    if (!is.null(mean) && !is.null(sd)) {
-      mu    <- mean
-      sigma <- sd
-      
-      ## 2) median & sd
-    } else if (!is.null(median) && !is.null(sd)) {
-      mu    <- median
-      sigma <- sd
-      
-      ## 3) median and 33–66% quantiles
-    } else if (!is.null(median) && !is.null(q33) && !is.null(q66)) {
-      mu <- median
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma_33 <- (q33 - mu) / z1
-      sigma_66 <- (q66 - mu) / z2
-      sigma    <- mean(c(sigma_33, sigma_66))
-      
-      ## 4) median and 5–95% quantiles
-    } else if (!is.null(median) && !is.null(q5) && !is.null(q95)) {
-      mu <- median
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma_5  <- (q5  - mu) / z1
-      sigma_95 <- (q95 - mu) / z2
-      sigma    <- mean(c(sigma_5, sigma_95))
-      
-      ## 5) 33–66% quantiles only
-    } else if (!is.null(q33) && !is.null(q66)) {
-      p1 <- probs_33_66[1]
-      p2 <- probs_33_66[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma <- (q66 - q33) / (z2 - z1)
-      mu    <- q33 - sigma * z1
-      
-      ## 6) 5–95% quantiles only
-    } else if (!is.null(q5) && !is.null(q95)) {
-      p1 <- probs_5_95[1]
-      p2 <- probs_5_95[2]
-      z1 <- qnorm(p1)
-      z2 <- qnorm(p2)
-      
-      sigma <- (q95 - q5) / (z2 - z1)
-      mu    <- q5 - sigma * z1
-      
-    }  else {
-      stop("Not enough information for normal. Provide one of:
-      (mean & sd),
-      (median & sd),
-      (median & q33 & q66),
-      (median & q5 & q95),
-      (q33 & q66), or
-      (q5 & q95).")
-    }
-    
-    if (!is.finite(mu) || !is.finite(sigma) || sigma <= 0) {
-      stop("Invalid normal parameters inferred from inputs.")
-    }
-    
-    # Implied stats for normal X
-    out_mean <- mu
-    out_median <- mu
-    out_sd <- sigma
-    
-    if (return_params==T) {
-      return(list(mu=mu, sigma=sigma, mean=out_mean, median=out_median, sd=out_sd))
-    }
-    
-    
-    if (plot==T) {
-      draws <- rnorm(n = 10000, mu, sigma)
-      print(paste("mean: ",round(mean(draws),5) ) )
-      print(paste("median: ",round(median(draws), 5) ) )
-      print(paste("std: ",round(sd(draws), 5) ) )
-      print(paste("66%: ",round(quantile(draws,0.66), 5) ) )
-      print(paste("33%: ",round(quantile(draws,0.33), 5) ) )
-      print(paste("95%: ",round(quantile(draws,0.95), 5) ) )
-      print(paste("5%: ",round(quantile(draws,0.05), 5) ) )
-      plot(density(draws[draws > 0 & draws < 10*sd(draws)])) }
-    
-    return(rnorm(n, mu, sigma)) 
-    
-    
-  }  else {stop("choose normal or lognormal distribution")}
-  
-}
+# Shared distribution-fitting / sampling helpers: fit_distribution,
+# qlnorm_fit/qnorm_fit, truncated inverse-CDF samplers, split-normal and
+# fit_quantile_dist. Kept in one file so Generate and the test harness agree.
+.utils <- "distribution_utils.R"
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .utils)))
+  .utils <- file.path(dirname(.sp), .utils)
+source(.utils)
 
 # logical
 overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
 main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
+diagnostics = ifelse(is.null(opts[["diagnostics"]]), T, as.logical(opts["diagnostics"]) )
 
 # numeric
 n_scenarios = ifelse(is.null(opts[["n"]]), 10000, as.numeric(opts["n"]) )
@@ -283,6 +42,20 @@ seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
 
 # strings
 res = ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o"]) )
+sampling_method = ifelse(is.null(opts[["method"]]), "sobol", as.character(opts["method"]) )
+if (!sampling_method %in% c("sobol","montecarlo")) stop("--method must be 'sobol' or 'montecarlo'")
+
+# theta for the deterministic main scenario (--base=T): a fixed angle, or "na"
+# to keep theta uncertain (sampled). Ignored when --base=F.
+angle_opt = ifelse(is.null(opts[["angle"]]), "10", as.character(opts["angle"]))
+keep_theta_uncertain <- str_to_lower(str_trim(angle_opt)) == "na"
+if (!keep_theta_uncertain) {
+  base_theta <- suppressWarnings(as.numeric(angle_opt))
+  if (length(base_theta) != 1 || is.na(base_theta)) stop("--angle must be a number or 'na'")
+  if (base_theta < 0 || base_theta > 90) stop("--angle must be between 0 and 90, or 'na'")
+} else {
+  base_theta <- NA_real_
+}
 
 # Make sure the file exists (create it if not)
 if (!dir.exists(res)) {
@@ -319,19 +92,80 @@ cov_matrix <- matrix(c(1, rho_log, rho_log, 1), nrow=2, byrow=TRUE)
 chol_cov <- chol(cov_matrix)
 n_draws <- n_scenarios
 
-draw_joint_ecs_tcr <- function(n) {
-  z_joint <- matrix(rnorm(2 * n), ncol=2) %*% chol_cov
+# Discrete grids (equally-weighted) sampled jointly with the climate parameters.
+rcp_choices        <- c("RCP3PD","RCP45","RCP6","RCP85")
+pulse_choices      <- seq(5,80,by=1)
+cool_choices       <- seq(0,40,by=1)
+term_choices       <- seq(2200,2600,by=100)
+start_choices      <- seq(2025,2100,by=25)
+
+# Termination is modelled as a constant per-year hazard h = prob:
+#   P(termination at year t | not yet terminated) = h.
+# h is drawn log-uniform on [hazard_lo, hazard_hi]; this range is chosen so the
+# implied median termination delay, ln(0.5)/ln(1-h), is long enough to span the
+# analysed run (~700 yr at h=1e-3 down to ~7 yr at h=1e-1).
+hazard_lo <- 1e-3
+hazard_hi <- 1e-1
+
+# FAIR analysis horizon, in model-year units (t=1 is calendar 2020). FAIR solves
+# t=1..1000, but post-processing keeps only t<=480 (the projection window
+# t_proj=2020..2500; see sanitize_dt in Analyze_montecarlo.R). The termination
+# time term_delta is the model-year SRM is switched off (t.val gt term_delta -> 0
+# in experiments/srm.gms); censoring it at t_horizon means a termination in the
+# last analysed year leaves no post-termination period, i.e. "no termination
+# within the run". Keep this in sync with the t<=480 cut in Analyze.
+t_horizon <- 480
+
+# Map uniform (0,1) draws onto an equally-weighted discrete grid (inverse CDF).
+map_discrete <- function(u, choices) {
+  k <- length(choices)
+  choices[pmin(floor(u * k) + 1L, k)]
+}
+
+
+# Each realization is a point in a 19-dimensional unit hypercube:
+#  FAIR parameters (drive a FAIR run, encoded in the gdx file name):
+#   1: ecs, 2: tcr (-> correlated joint lognormal)
+#   3: rcp, 4: pulse, 5: cool, 6: term, 7: start, 8: term_delta (geometric; hazard from col 12)
+#  Post-processing parameters (applied to the gdx output, not part of any run):
+#   9: theta, 10: alpha, 11: delta, 12: prob (per-year termination hazard), 13: mortality_srm, 14: forctoTg,
+#   15: TgtoUSD, 16: mortality_ozone, 17: vsl, 18: vsl_eta, 19: dg
+n_dim <- 19
+
+if (sampling_method == "sobol") {
+  # Owen-scrambled Sobol sequence (randomized QMC). qrng delegates Owen
+  # scrambling to spacefillr, so both packages are required. Scrambling keeps
+  # the low-discrepancy structure while randomizing the net: `seed` therefore
+  # selects an unbiased design (repeated seeds give Monte-Carlo error bars on
+  # the QMC estimate) and every coordinate lands strictly inside (0,1).
+  for (pkg in c("spacefillr","qrng")) {
+    if (!requireNamespace(pkg, quietly=TRUE)) install.packages(pkg, repos="http://cloud.r-project.org")
+  }
+  unit_draws <- qrng::sobol(n=n_draws, d=n_dim, randomize="Owen", seed=seed)
+} else if (sampling_method == "montecarlo") {
+  # Plain Monte Carlo: independent pseudo-random uniforms.
+  unit_draws <- matrix(runif(n_draws * n_dim), ncol=n_dim)
+} else {
+  stop("--method must be 'sobol' or 'montecarlo'")
+}
+
+# Transform uniforms into the correlated joint lognormal (ecs, tcr) marginals.
+draw_joint_ecs_tcr <- function(u_mat) {
+  u_mat <- pmin(pmax(u_mat, 1e-10), 1 - 1e-10)  # guard qnorm() against 0/1
+  z_joint <- qnorm(u_mat) %*% chol_cov   # independent normals -> correlated
   list(
     ecs = exp(ecs_par$mu + ecs_par$sigma * z_joint[,1]),
     tcr = exp(tcr_par$mu + tcr_par$sigma * z_joint[,2])
   )
 }
 
-joint_draw <- draw_joint_ecs_tcr(n_draws)
+joint_draw <- draw_joint_ecs_tcr(unit_draws[, 1:2, drop=FALSE])
 ecs_draw <- joint_draw$ecs
 tcr_draw <- joint_draw$tcr
 
 # Enforce ecs > tcr for every stored realization (after rounding to tenths).
+# The few rejected draws are refreshed with pseudo-random joint normals: this is
+# negligible relative to the quasi-random bulk and keeps the constraint exact.
 invalid <- which(round(ecs_draw * 10, 0) <= round(tcr_draw * 10, 0))
 iter <- 0
 while (length(invalid) > 0) {
@@ -339,37 +173,226 @@ while (length(invalid) > 0) {
   if (iter > 10000) {
     stop("Unable to obtain n_draws with ecs > tcr after repeated redraws.")
   }
-  redraw <- draw_joint_ecs_tcr(length(invalid))
+  redraw <- draw_joint_ecs_tcr(matrix(runif(length(invalid) * 2), ncol=2))
   ecs_draw[invalid] <- redraw$ecs
   tcr_draw[invalid] <- redraw$tcr
   invalid <- which(round(ecs_draw * 10, 0) <= round(tcr_draw * 10, 0))
 }
 
+# Per-year termination hazard (col 12) and the termination delay it induces
+# (col 8). Given hazard h, the delay D since deployment is geometric; we draw it
+# with the continuous-time inverse CDF D = ln(1-u)/ln(1-h) on its own Sobol
+# coordinate and round to a whole model-year (>= 1). prob stores the hazard
+# itself (4 sig figs), used unrounded here so term_delta and the stored prob
+# stay mutually consistent.
+hazard <- signif(exp(qunif(unit_draws[,12], log(hazard_lo), log(hazard_hi))), 4)
+term_delay <- pmax(round(log1p(-unit_draws[,8]) / log1p(-hazard)), 1)
+
+# Absolute termination time (model-year index) = deployment year + delay,
+# censored at the FAIR horizon. term_delta == t_horizon is the "no termination
+# within the run" outcome. pulse is drawn here too so term_delta can fold it in.
+pulse_draw <- map_discrete(unit_draws[,4], pulse_choices)
+term_delta_draw <- pmin(pulse_draw + term_delay, t_horizon)
+
 new_data <- data.frame(
   ID = max_id + seq_len(n_draws),
+  # --- FAIR-run parameters ---
   ecs = round(ecs_draw * 10, 0),
   tcr = round(tcr_draw * 10, 0),
-  rcp = sample(c("RCP3PD","RCP45","RCP6","RCP85"), n_draws, replace=TRUE),
-  pulse = sample(c(5,10,20,30,40,50,60,70,80), n_draws, replace=TRUE),
-  cool = sample(seq(0,40,by=5), n_draws, replace=TRUE),
-  term = sample(seq(2300,2600,by=100), n_draws, replace=TRUE),
-  start = sample(seq(2025,2100,by=25), n_draws, replace=TRUE),
-  term_delta = sample(seq(10,500,by=10), n_draws, replace=TRUE)
+  rcp = map_discrete(unit_draws[,3], rcp_choices),
+  pulse = pulse_draw,
+  cool = map_discrete(unit_draws[,5], cool_choices),
+  term = map_discrete(unit_draws[,6], term_choices),
+  start = map_discrete(unit_draws[,7], start_choices),
+  term_delta = term_delta_draw,   # absolute termination year (deployment + geometric delay, censored at horizon)
+  # --- post-processing parameters (moved from Analyze_montecarlo.R) ---
+  theta           = round(qlnorm_fit_trunc(unit_draws[,9], lo=0, hi=90, median=10, q5=3, q95=30), 0),
+  alpha           = round(qlnorm_fit(unit_draws[,10], median=0.00575, sd=0.00575*382/179), 4),
+  delta           = round(qunif(unit_draws[,11], 0.005, 0.075), 2),  # +/- half a 0.01 step so edges 0.01/0.07 get a full bin
+  prob            = hazard,   # per-year termination hazard (log-uniform), drives term_delta
+  mortality_srm   = round(qlnorm_fit(unit_draws[,13], median=7400, q5=2300, q95=16000)),  # lognormal>0: no clamp needed
+  forctoTg        = round(1 / qunif(unit_draws[,14], 0.2, 1.5), 2),
+  TgtoUSD         = round(qunif(unit_draws[,15], 0.75, 3), 2),
+  mortality_ozone = round(qnorm_fit_trunc(unit_draws[,16], lo=0, median=11250, q5=5000, q95=17500) / 100),
+  vsl             = round(qunif(unit_draws[,17], 7.5, 13.6), 0) * 1e6,
+  vsl_eta         = round(qunif(unit_draws[,18], 0.35, 1.05), 1),  # +/- half a 0.1 step so edges 0.4/1.0 get a full bin
+  dg              = round(qnorm_fit(unit_draws[,19], median=0.015, sd=0.005), 3),
+  stringsAsFactors = FALSE
 )
 
 data <- data %>% bind_rows(new_data)
   
-data <- data %>% 
-    mutate(term_delta=pulse+term_delta,
-           term=ifelse(cool==0,2700,term),
-           start=ifelse(cool==0,2700,start) ) %>% 
+data <- data %>%
+    mutate(term=ifelse(cool==0,2700,term),
+           start=ifelse(cool==0,2700,start) ) %>%
     unique()
   
 if (main_scenario==T) {
-    data <- rbind(data %>% 
+    data <- rbind(data %>%
                     mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=5 ),
-                  data %>% 
-                    mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=30 ) ) }
+                  data %>%
+                    mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=30 ) )
+    # Fix the post-processing parameters for the deterministic main scenario
+    # (previously applied in Analyze_montecarlo.R).
+    data <- data %>% mutate(vsl = 10 * 1e6, delta = 0.02, vsl_eta = 1)
+    if (!keep_theta_uncertain) data <- data %>% mutate(theta = base_theta) }
   
-write.csv(data,file=paste0(res,"/id_montecarlo.csv")) 
+write.csv(data,file=paste0(res,"/id_montecarlo.csv"))
+
+# ---------------------------------------------------------------------------
+# Optional diagnostics: compare the freshly drawn marginals (new_data) against
+# the theoretical distribution each parameter targets. The theoretical curve
+# folds in the transforms the sampler actually applies -- truncation (theta,
+# ozone, via the truncated inverse-CDF) and grid binning (coarse rounded params)
+# -- so the only residual, annotated deviations are integer rounding and the
+# joint ecs>tcr rejection (which no single marginal can capture).
+# ---------------------------------------------------------------------------
+if (diagnostics == T) {
+  cat("Writing distribution diagnostics... \n")
+  pdf_path <- paste0(res, "/diagnostics_distributions.pdf")
+  pdf(pdf_path, width = 9, height = 11)
+
+  # fitted (mu,sigma); warnings already surfaced during sampling, so muffle here
+  ln <- function(...) suppressWarnings(fit_distribution("lognormal", ..., return_params = TRUE))
+  nm <- function(...) suppressWarnings(fit_distribution("normal",    ..., return_params = TRUE))
+
+  # one parameter -> a density overlay + a theoretical Q-Q plot
+  diag_panel <- function(x, dfun, qfun, title, markers = NULL, note = NULL) {
+    x <- x[is.finite(x)]
+    xs <- seq(min(x), max(x), length.out = 512)
+    yt <- dfun(xs)
+    h  <- hist(x, breaks = 40, plot = FALSE)
+    hist(x, breaks = 40, freq = FALSE, col = "grey85", border = "grey60",
+         main = title, xlab = "value",
+         ylim = c(0, max(c(h$density, yt), na.rm = TRUE)))
+    lines(xs, yt, col = "red", lwd = 2)
+    if (!is.null(markers)) abline(v = markers, col = "blue", lty = 2)
+    legend("topright", c("drawn","theoretical","target q"),
+           col = c("grey60","red","blue"), lwd = c(6,2,1), lty = c(1,1,2),
+           bty = "n", cex = 0.7)
+    summ <- sprintf("emp med/q5/q95 = %.4g / %.4g / %.4g | theo = %.4g / %.4g / %.4g",
+                    median(x), quantile(x, .05), quantile(x, .95),
+                    qfun(.5), qfun(.05), qfun(.95))
+    mtext(summ, side = 1, line = 2.6, cex = 0.5)
+    if (!is.null(note)) mtext(note, side = 3, line = -1, cex = 0.55, col = "darkgreen")
+    # theoretical Q-Q
+    pp  <- ppoints(min(length(x), 2000))
+    plot(qfun(pp), quantile(x, pp, names = FALSE), pch = ".", cex = 2, col = "grey30",
+         main = paste("Q-Q:", title), xlab = "theoretical quantile", ylab = "empirical quantile")
+    abline(0, 1, col = "red", lwd = 1.5)
+  }
+
+  # truncated density / quantile on [lo,hi] from a base d/p/q (matches the
+  # truncated inverse-CDF sampler: redistributes tail mass, no boundary spike)
+  dtrunc <- function(dfun, pfun, lo, hi) function(x) ifelse(x >= lo & x <= hi, dfun(x) / (pfun(hi) - pfun(lo)), 0)
+  qtrunc <- function(pfun, qfun, lo, hi) function(pp) qfun(pfun(lo) + pp * (pfun(hi) - pfun(lo)))
+
+  # discrete-aware panel for coarsely-rounded (grid) parameters: observed vs the
+  # theoretical mass binned onto the grid, P(round(X)=k) = F(k+step/2)-F(k-step/2)
+  diag_discrete <- function(x, cdf, step, title, note = NULL) {
+    vals <- sort(unique(x))
+    obs  <- as.numeric(table(factor(x, levels = vals))) / length(x)
+    exq  <- pmax(0, cdf(vals + step / 2) - cdf(vals - step / 2)); exq <- exq / sum(exq)
+    ymax <- max(obs, exq)
+    plot(vals, obs, type = "h", lwd = 6, col = "grey70", ylim = c(0, ymax),
+         main = title, xlab = "grid value", ylab = "probability")
+    points(vals, exq, col = "red", pch = 19, cex = 0.9)
+    legend("topright", c("observed", "expected (binned theory)"),
+           col = c("grey70", "red"), pch = c(NA, 19), lwd = c(6, NA), bty = "n", cex = 0.7)
+    if (!is.null(note)) mtext(note, side = 3, line = -1, cex = 0.55, col = "darkgreen")
+    plot(exq, obs, pch = 19, col = "grey30", xlim = c(0, ymax), ylim = c(0, ymax),
+         main = paste("obs vs exp:", title), xlab = "expected prob", ylab = "observed prob")
+    abline(0, 1, col = "red", lwd = 1.5)
+  }
+
+  # --- joint ecs/tcr panel (correlation + constraint) ---
+  par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+  ex <- new_data$ecs / 10; tx <- new_data$tcr / 10
+  smoothScatter(ex, tx, xlab = "ECS", ylab = "TCR",
+                main = sprintf("Joint ECS-TCR  (empirical corr = %.3f, target 0.81)", cor(ex, tx)))
+  abline(0, 1, col = "red", lty = 2)
+  legend("bottomright", "ECS = TCR (constraint)", col = "red", lty = 2, bty = "n", cex = 0.8)
+
+  # --- per-parameter marginals (3 params = 3 rows of [density | Q-Q] per page) ---
+  par(mfrow = c(3, 2), mar = c(4.5, 4, 3, 1))
+
+  p <- ln(median = 3,   q5 = 2,    q95 = 5)
+  diag_panel(ex, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
+             "ecs (lognormal)", markers = c(2, 3, 5),
+             note = "drawn rounded to 0.1 & constrained ECS>TCR: lower-tail deviation expected")
+  p <- ln(median = 1.8, q5 = 1.2,  q95 = 2.4)
+  diag_panel(tx, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
+             "tcr (lognormal)", markers = c(1.2, 1.8, 2.4),
+             note = "drawn rounded to 0.1 & constrained ECS>TCR: upper-tail deviation expected")
+  p <- ln(median = 10,  q5 = 3,    q95 = 30)
+  diag_panel(new_data$theta,
+             dtrunc(function(x) dlnorm(x, p$mu, p$sigma), function(x) plnorm(x, p$mu, p$sigma), 0, 90),
+             qtrunc(function(x) plnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma), 0, 90),
+             "theta (lognormal truncated 0-90)", markers = c(3, 10, 30),
+             note = "truncated inverse-CDF on (0,90]; drawn rounded to 1")
+  p <- ln(median = 0.00575, sd = 0.00575 * 382 / 179)
+  diag_panel(new_data$alpha, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
+             "alpha (lognormal, median+sd)")
+  p <- ln(median = 7400, q5 = 2300, q95 = 16000)
+  diag_panel(new_data$mortality_srm, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
+             "mortality_srm (lognormal)", markers = c(2300, 7400, 16000),
+             note = "inputs inconsistent (q5*q95 != median^2): compromise fit")
+  p <- nm(median = 11250, q5 = 5000, q95 = 17500); mo <- p$mu / 100; so <- p$sigma / 100
+  diag_panel(new_data$mortality_ozone,
+             dtrunc(function(x) dnorm(x, mo, so), function(x) pnorm(x, mo, so), 0, Inf),
+             qtrunc(function(x) pnorm(x, mo, so), function(q) qnorm(q, mo, so), 0, Inf),
+             "mortality_ozone (normal /100, truncated >=0)", markers = c(50, 112.5, 175),
+             note = "truncated inverse-CDF at 0, scaled /100, rounded to 1")
+  p <- nm(median = 0.015, sd = 0.005)
+  diag_panel(new_data$dg, function(x) dnorm(x, p$mu, p$sigma), function(q) qnorm(q, p$mu, p$sigma),
+             "dg (normal, median+sd)")
+
+  # fine-grid uniform parameters (rounding far below the spread -> continuous overlay)
+  diag_panel(new_data$TgtoUSD, function(x) dunif(x, 0.75, 3),    function(q) qunif(q, 0.75, 3),
+             "TgtoUSD ~ U(0.75,3)", note = "drawn rounded to 0.01 (effectively continuous)")
+  diag_panel(new_data$forctoTg, function(x) 1 / ((1.5 - 0.2) * x^2), function(q) 1 / (1.5 - q * (1.5 - 0.2)),
+             "forctoTg = 1/U(0.2,1.5)", note = "reciprocal-uniform; drawn rounded to 0.01")
+
+  # prob = per-year termination hazard ~ LogUniform(hazard_lo,hazard_hi): a
+  # log-uniform shows up as a flat density on the log10 scale, so check it there.
+  diag_panel(log10(new_data$prob),
+             function(x) dunif(x, log10(hazard_lo), log10(hazard_hi)),
+             function(q) qunif(q, log10(hazard_lo), log10(hazard_hi)),
+             "log10(prob): hazard ~ LogUniform(1e-3,1e-1)",
+             note = "per-year termination hazard; drives term_delta, drawn to 4 sig figs")
+
+  # Termination delay (years of SRM before termination), the quantity the hazard
+  # acts on directly: term_delta itself is the absolute year (pulse + delay,
+  # censored at the horizon), so we validate the underlying delay here. Each
+  # realization's delay is geometric with that realization's own hazard h, and h
+  # is log-uniform, so the marginal is the log-uniform mixture of exponentials
+  # (computed below by averaging over a fine h grid). The delay is shown censored
+  # at t_horizon to mirror the run: the upper clamp piles the "no termination
+  # within the run" tail onto the horizon, so expect the histogram to spike and
+  # the Q-Q to flatten there (annotated) while the bulk tracks the curve.
+  .hgrid   <- exp(seq(log(hazard_lo), log(hazard_hi), length.out = 512))
+  .lamgrid <- -log1p(-.hgrid)                       # exponential rate per hazard
+  d_delay  <- function(d) vapply(d, function(z) mean(.lamgrid * exp(-.lamgrid * z)), numeric(1))
+  p_delay  <- function(d) vapply(d, function(z) mean(1 - exp(-.lamgrid * z)), numeric(1))
+  .dg <- c(0, exp(seq(log(0.5), log(1e4), length.out = 4000)))  # dense grid to invert the CDF
+  .pg <- p_delay(.dg)
+  q_delay  <- function(pp) approx(.pg, .dg, xout = pp, rule = 2)$y
+  delay_plot <- pmin(term_delay, t_horizon)         # term_delay is the uncensored draw, in scope above
+  diag_panel(delay_plot, d_delay, q_delay,
+             "termination delay (LogUnif-hazard mixture of geometrics)",
+             note = sprintf("%.1f%% censored at t_horizon=%d (no termination in run): hist spike & Q-Q flatten there",
+                            100 * mean(delay_plot == t_horizon), t_horizon))
+
+  # coarse-grid uniform parameters (few distinct values -> discrete-aware panel).
+  # Sampling ranges widened by +/- half a grid step so every grid value (incl.
+  # the edges) gets an equal-width bin; the expected-mass cdf uses the same
+  # widened bounds so expected stays flat across all grid points.
+  diag_discrete(new_data$delta,    function(x) punif(x, 0.005, 0.075), 0.01, "delta ~ U(0.01,0.07) [grid 0.01, edges equalized]")
+  diag_discrete(new_data$vsl_eta,  function(x) punif(x, 0.35, 1.05),   0.1,  "vsl_eta ~ U(0.4,1) [grid 0.1, edges equalized]")
+  diag_discrete(new_data$vsl / 1e6, function(x) punif(x, 7.5, 13.6), 1,    "vsl/1e6 ~ round(U(7.5,13.6)) [grid 1]",
+                note = "banker's rounding at .5 may shift edge bins slightly")
+
+  dev.off()
+  cat("Diagnostics written to", pdf_path, "\n")
+}
 
