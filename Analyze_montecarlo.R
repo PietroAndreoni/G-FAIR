@@ -158,8 +158,18 @@ prepare_join_table <- function(filter_experiment) {
   base <- temp_ghgpulse[base, on = c("t",pulse_scenarios), nomatch = NULL]
   
   replace_num_na0(base)
-  base[, term := NULL] # remove term (readded later)
-  base <- merge(base,all_scenarios[!is.na(term)], by = setdiff(scenario_names,c("term")), allow.cartesian = TRUE)
+  # The terminated run (srmpulsemaskedterm) carries a real, term-specific
+  # temperature path, so its `term` (= termination time) MUST be kept: each path
+  # stays matched to its own termination time. The other experiments are
+  # termination-independent (their gdx has term = NA), so we drop the placeholder
+  # term and broadcast that single path across every termination time present in
+  # the chunk. Broadcasting the terminated run instead would mis-pair the
+  # overshoot temperature with the wrong term (and double-count) whenever two
+  # realizations share a FAIR scenario but differ in termination time.
+  if (filter_experiment != "srmpulsemaskedterm") {
+    base[, term := NULL] # term-independent run: drop placeholder, re-add below
+    base <- merge(base, all_scenarios[!is.na(term)], by = setdiff(scenario_names, c("term")), allow.cartesian = TRUE)
+  }
   # allow.cartesian: several realizations may share the same FAIR scenario (and
   # thus the same gdx) while differing in the post-processing parameters.
   base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("gas")), allow.cartesian = TRUE)
