@@ -25,6 +25,12 @@ require_gdxtools()
 
 start.time <- Sys.time()
 
+.mc_utils <- "montecarlo_utils.R"
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
+  .mc_utils <- file.path(dirname(.sp), .mc_utils)
+source(.mc_utils)
+
 # extract names function rewritten using data.table/vector ops
 extract_names_dt <- function(files_vec) {
   DT <- data.table(gdx = files_vec)
@@ -80,13 +86,16 @@ npv_aggregator <- function(DT, keep_names = all_names) {
   DT[, srm_pollution := vsl * globaltouspc * (gwpt/gwp)  ^ (vsl_eta) * srm_masking * forctoTg * mortality_srm]
   DT[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp)  ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
   DT[, imperfect_masking := 2 * gwpt * alpha * pmax(0,temp_base) * (1 - cos(theta * pi/180)) * srm_masking * as.numeric(ecs)/10 / 3.71 * (1 + srm/forc)]
+  mc_assert_no_missing(DT, c("dam", "direct_cost", "srm_pollution",
+                             "tropoz_pollution", "imperfect_masking"),
+                       "npv_aggregator computed costs")
   # aggregator
   res <- DT[, .(
-    dirnpv = sum(direct_cost / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE),
-    srmpnpv = sum(srm_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE),
-    ozpnpv = sum(tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE),
-    masknpv = sum(imperfect_masking / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE),
-    damnpv = sum(dam / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)
+    dirnpv = sum(direct_cost / (1 + delta)^(t - as.numeric(pulse_time))),
+    srmpnpv = sum(srm_pollution / (1 + delta)^(t - as.numeric(pulse_time))),
+    ozpnpv = sum(tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time))),
+    masknpv = sum(imperfect_masking / (1 + delta)^(t - as.numeric(pulse_time))),
+    damnpv = sum(dam / (1 + delta)^(t - as.numeric(pulse_time)))
   ), by = keep_names]
   # convert to long format
   res_long <- melt(
@@ -157,7 +166,6 @@ prepare_join_table <- function(filter_experiment) {
   base <- temp_base[base, on = c("t", base_scenarios)]
   base <- temp_ghgpulse[base, on = c("t",pulse_scenarios), nomatch = NULL]
   
-  replace_num_na0(base)
   # The terminated run (srmpulsemaskedterm) carries a real, term-specific
   # temperature path, so its `term` (= termination time) MUST be kept: each path
   # stays matched to its own termination time. The other experiments are
@@ -173,6 +181,14 @@ prepare_join_table <- function(filter_experiment) {
   # allow.cartesian: several realizations may share the same FAIR scenario (and
   # thus the same gdx) while differing in the post-processing parameters.
   base <- merge(base, id_montecarlo, by = setdiff(scenario_names,c("gas")), allow.cartesian = TRUE)
+  mc_assert_no_missing(
+    base,
+    c("ID", "gas", "t", "temp", "srm", "srm_masking", "forc",
+      "concch4_pulse", "concch4_base", "temp_srm", "temp_srmpulse",
+      "temp_base", "temp_ghgpulse", post_cols),
+    paste0("prepare_join_table(", filter_experiment, ")")
+  )
+  mc_assert_unique_key(base, c("ID", "gas", "t"), paste0("prepare_join_table(", filter_experiment, ")"))
   return(base)
 }
 
@@ -230,7 +246,7 @@ if(run_hpc==F) {igdx()} else {
 }
 
 ## climate damage function parameters
-gwp <- 105*1e12 # initial world gdp
+gwp <- 85.28*1e12*1.085 # initial world gdp: 2019 from world bank (constant 2015 USD to 2020)
 #forctoTg <- 1/0.2 # from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5897825/ 
 globaltouspc <- 1.82 * 10937 / 63515 # ratio between global GDPc and USgdpc in 2020, adjusted to match McDuffie 2023 
 #forctoUSD <- forctoTg * TgtoUSD # US$/(W/m^2)
@@ -248,32 +264,36 @@ sanitized_names <- extract_names_dt(filelist)
 
 # Load id_montecarlo from folders
 id_list <- lapply(input_folder, function(folder) {
-  read.csv(file.path(folder, "id_montecarlo.csv"), stringsAsFactors = FALSE)
+  mc_strip_csv_index(read.csv(file.path(folder, "id_montecarlo.csv"), stringsAsFactors = FALSE))
 })
 id_montecarlo <- rbindlist(id_list, fill = TRUE)
 setDT(id_montecarlo)
+validate_id_montecarlo(id_montecarlo, "combined id_montecarlo.csv inputs")
 # The FAIR (scenario) parameters drive a FAIR run and are encoded in the gdx
 # file names; the post-processing parameters are now sampled once in
 # Generate_montecarlo.R and read here straight from id_montecarlo.csv.
-fair_cols <- c("ecs","tcr","rcp","pulse","cool","term","start","term_delta")
-post_cols <- c("theta","alpha","delta","prob","mortality_srm","forctoTg",
-               "TgtoUSD","mortality_ozone","vsl","vsl_eta","dg")
-missing_cols <- setdiff(c(fair_cols, post_cols), names(id_montecarlo))
+fair_cols <- MC_FAIR_COLS
+post_cols <- MC_POST_COLS
+metadata_cols <- MC_METADATA_COLS
+id_cols <- c("ID", fair_cols, post_cols, metadata_cols)
+missing_cols <- setdiff(id_cols, names(id_montecarlo))
 if (length(missing_cols) > 0) {
   stop("id_montecarlo csv missing columns: ", paste(missing_cols, collapse=", "),
        ". Regenerate it with the current Generate_montecarlo.R.")
 }
-id_montecarlo <- id_montecarlo[, c(fair_cols, post_cols), with = FALSE]
+id_montecarlo <- id_montecarlo[, ..id_cols]
 
 # FAIR/scenario columns are matched against the gdx file names as strings.
 for (cname in setdiff(fair_cols, "rcp")) {
   id_montecarlo[, (cname) := as.character(as.integer(round(as.numeric(get(cname)))))]
 }
+id_montecarlo[, ID := as.character(as.integer(round(as.numeric(ID))))]
 id_montecarlo[, rcp := str_remove(as.character(rcp), "RCP")]
 # Post-processing columns stay numeric for the cost/damage computations.
 for (cname in post_cols) id_montecarlo[, (cname) := as.numeric(get(cname))]
+for (cname in c("seed", "draw_index", "term_delay")) id_montecarlo[, (cname) := as.numeric(get(cname))]
+id_montecarlo[, censored_termination := as.logical(censored_termination)]
 setnames(id_montecarlo, c("pulse","cool","term_delta","start","term"), c("pulse_time","cool_rate","term","geo_start","geo_end"))
-id_montecarlo <- unique(id_montecarlo)
 
 cat("Loaded", nrow(id_montecarlo), "montecarlo realizations from id_montecarlo.csv \n")
 
@@ -287,11 +307,6 @@ scenario_names <- setdiff(names(sanitized_names), c("gdx","file","experiment"))
 pulse_scenarios <- setdiff(scenario_names, c("cool_rate","geo_end","geo_start","term"))
 base_scenarios <- setdiff(pulse_scenarios, c("gas","pulse_time"))
 
-
-## all_experiments: srmpulsemaskedterm rows, scenario columns only
-all_experiments <- unique(
-  sanitized_names[experiment == "srmpulsemaskedterm", ..scenario_names]
-)
 
 ## pre-filter by experiment so we don't repeat this in the loop
 dt_srmpt   <- sanitized_names[experiment == "srmpulsemaskedterm"]
@@ -316,56 +331,66 @@ setkeyv(dt_srm,     k_no_term)
 setkeyv(dt_pulse,   k_pulse)
 setkeyv(dt_base,    k_base)
 
+completed_runs <- data.table()
 if(file.exists(file.path(output_folder, name_output))) { 
   existing_output <- fread(file = file.path(output_folder, name_output))
-  existing_output <- unique(existing_output[,..scenario_names])
-  existing_output[, names(existing_output) := lapply(.SD, as.character)]
   if (skip_scenarios == F) {
     file.remove(file.path(output_folder, name_output))
-    file.remove(file.path(output_folder, paste0("scc_",name_output)) ) 
-    file.remove(file.path(output_folder, paste0("sccnosrm_",name_output)) ) }
-  } else {skip_scenarios <- F}
+    file.remove(file.path(output_folder, paste0("scc_",str_remove(name_output,"npc_"))) )
+    file.remove(file.path(output_folder, paste0("sccnosrm_",str_remove(name_output,"npc_"))) )
+  } else {
+    if (!all(c("ID", "gas") %in% names(existing_output))) {
+      stop("Existing ", name_output, " is legacy output without ID/gas keys. Rerun with --skip=F to replace it.")
+    }
+    completed_runs <- unique(existing_output[, .(ID = as.character(ID), gas = as.character(gas))])
+  }
+} else {skip_scenarios <- F}
+
+expected_gases <- sort(unique(na.omit(sanitized_names$gas)))
+if (length(expected_gases) == 0L) stop("No gas-specific GDX files found in results folders.")
+
+id_scenarios <- unique(id_montecarlo[, c("ID", setdiff(scenario_names, "gas")), with = FALSE])
+expected_runs <- id_scenarios[, .(gas = expected_gases), by = names(id_scenarios)]
+setcolorder(expected_runs, c("ID", scenario_names))
+
+if (skip_scenarios == TRUE && nrow(completed_runs) > 0L) {
+  expected_runs <- expected_runs[!completed_runs, on = c("ID", "gas")]
+}
+
+if (nrow(expected_runs) == 0L) {
+  cat("No new Monte Carlo runs to analyze after applying existing-output skip.\n")
+  quit(save = "no", status = 0)
+}
+
+required_runs <- copy(expected_runs)
+required_runs[, f_srmpulsemaskedterm := dt_srmpt[required_runs, on = k_all, mult = "first"]$gdx]
+required_runs[, f_srmpulsemasked     := dt_srmptm[required_runs, on = k_no_term, mult = "first"]$gdx]
+required_runs[, f_srmpulse           := dt_srmp[required_runs, on = k_no_term, mult = "first"]$gdx]
+required_runs[, f_srm                := dt_srm[required_runs, on = k_no_term, mult = "first"]$gdx]
+required_runs[, f_pulse              := dt_pulse[required_runs, on = k_pulse, mult = "first"]$gdx]
+required_runs[, f_base               := dt_base[required_runs, on = k_base, mult = "first"]$gdx]
+
+file_cols <- grep("^f_", names(required_runs), value = TRUE)
+missing_required <- required_runs[!stats::complete.cases(required_runs[, ..file_cols])]
+if (nrow(missing_required) > 0L) {
+  missing_required[, missing_experiments := apply(.SD, 1, function(z) paste(names(z)[is.na(z)], collapse = ", ")), .SDcols = file_cols]
+  details <- paste(capture.output(print(head(missing_required[, c("ID", scenario_names, "missing_experiments"), with = FALSE], 20))), collapse = "\n")
+  stop("Missing required GDX experiment files for Monte Carlo realizations:\n", details)
+}
+
+all_experiments <- unique(required_runs[, ..scenario_names])
 
 cat("End data preprocessing...\n")
 
 for (n_chunk in seq(1,nrow(all_experiments), by = N+1 )) { 
   
-  files_loop <- c()
-  
-  ## current experiment row
-  for (n_loop in seq(n_chunk,min(n_chunk+N,nrow(all_experiments))) ) {
-  
-  exp_row <- all_experiments[n_loop]
-  
-  if ( skip_scenarios==T) if (nrow(existing_output[exp_row, on = k_all, nomatch = 0L]) > 0 ) next 
-  
-  ## 1) srmpulsemaskedterm: match on all scenario columns
-  f1 <- dt_srmpt[exp_row, on = k_all, mult = "first"]$gdx
-  
-  ## 2-4) srmpulsemasked / srmpulse / srm: drop term
-  exp_no_term <- exp_row[, ..k_no_term]
-  
-  f2 <- dt_srmptm[exp_no_term, on = k_no_term, mult = "first"]$gdx
-  f3 <- dt_srmp[exp_no_term,   on = k_no_term, mult = "first"]$gdx
-  f4 <- dt_srm[exp_no_term,    on = k_no_term, mult = "first"]$gdx
-  
-  ## 5) pulse: drop term, cool_rate, geo_start, geo_end
-  exp_pulse <- exp_row[, ..k_pulse]
-  f5 <- dt_pulse[exp_pulse, on = k_pulse, mult = "first"]$gdx
-  
-  ## 6) base: drop term, cool_rate, geo_start, geo_end, gas, pulse_time
-  exp_base <- exp_row[, ..k_base]
-  f6 <- dt_base[exp_base, on = k_base, mult = "first"]$gdx
-  
-  files_loop_mini <- c(f1, f2, f3, f4, f5, f6)
-  
-  if (length(files_loop_mini) != 6 || any(is.na(files_loop_mini))) next else files_loop <- append(files_loop,files_loop_mini) 
-  
-  }
+exp_chunk <- all_experiments[n_chunk:min(n_chunk+N,nrow(all_experiments))]
+runs_chunk <- required_runs[exp_chunk, on = scenario_names, nomatch = 0L]
+if (nrow(runs_chunk) == 0L) next
+expected_chunk_keys <- unique(runs_chunk[, .(ID = as.character(ID), gas = as.character(gas))])
 
+files_loop <- unique(na.omit(unlist(runs_chunk[, ..file_cols], use.names = FALSE)))
 if (length(files_loop) == 0) next     # skip loop iteration
-  
-files_loop <- unique(files_loop)
 
 cat("Loading the data for experiments", n_chunk, "to", n_chunk+N, "from a total of", nrow(all_experiments), "experiments...\n")
 
@@ -425,6 +450,8 @@ pulse_size <- pulse_size[, .(pulse_size = value[ experiment == "srmpulse" ] - va
 pulse_size <- pulse_size[ pulse_size != 0 ]
 pulse_size[ , pulse_size := ifelse(gas == "co2", pulse_size * 1e9, pulse_size * 1e6)]
 pulse_size[, t:=NULL]
+mc_assert_no_missing(pulse_size, c("pulse_size", "gas", "rcp", "ecs", "tcr", "cool_rate", "pulse_time", "geo_start", "geo_end"),
+                     paste0("pulse_size chunk ", n_chunk))
 
 # scc calculation (with SRM)
 scc <- merge(
@@ -434,18 +461,25 @@ scc <- merge(
 )
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE)
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_base = value)],  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
-replace_num_na0(scc)
+mc_assert_no_missing(scc, c("temp_srm", "temp_srmpulse", "concch4_pulse", "concch4_base"),
+                     paste0("SCC-with-SRM climate inputs chunk ", n_chunk))
 scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm","forctoTg"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
+mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
+                     paste0("SCC-with-SRM Monte Carlo inputs chunk ", n_chunk))
 scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
-scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)),na.rm = TRUE),
-                    ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), 
+mc_assert_no_missing(scc, c("tropoz_pollution", "dam"), paste0("SCC-with-SRM computed costs chunk ", n_chunk))
+scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))),
+                    ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
                 by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
 scc_agg[, scc := (damnpv + ozpnpv) / pulse_size]
-scc_agg <- unique(scc_agg)
+mc_assert_no_missing(scc_agg, c("ID", "gas", "pulse_size", "scc"), paste0("SCC-with-SRM output chunk ", n_chunk))
+mc_assert_unique_key(scc_agg, c("ID", "gas"), paste0("SCC-with-SRM output chunk ", n_chunk))
+mc_assert_key_set_equal(expected_chunk_keys, unique(scc_agg[, .(ID = as.character(ID), gas = as.character(gas))]),
+                        c("ID", "gas"), paste0("SCC-with-SRM output chunk ", n_chunk))
 
 # scc calculation (w/o SRM)
 scc <- merge(
@@ -455,22 +489,33 @@ scc <- merge(
 )
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","pulse_time"), all = FALSE)
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "base", .(t, rcp, ecs, tcr, concch4_base = value)],  by = c("t","rcp","ecs","tcr"), all.x = TRUE)
-replace_num_na0(scc)
-scc <- merge(scc, id_montecarlo[, c("ecs","tcr","rcp","pulse_time","alpha","delta","mortality_ozone","vsl","vsl_eta","dg"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
+mc_assert_no_missing(scc, c("temp_base", "temp_pulse", "concch4_pulse", "concch4_base"),
+                     paste0("SCC-no-SRM climate inputs chunk ", n_chunk))
+scc <- merge(scc, id_montecarlo[, c("ID","ecs","tcr","rcp","pulse_time","alpha","delta",
+                                    "mortality_ozone","vsl","vsl_eta","dg",
+                                    "sampler_version","sampling_method","seed",
+                                    "draw_index","term_delay","censored_termination"), with = FALSE],
+             by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
+mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
+                     paste0("SCC-no-SRM Monte Carlo inputs chunk ", n_chunk))
 scc <- scc[ t >= as.numeric(pulse_time) ]
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_pulse)^2 - pmax(0,temp_base)^2) )]
-scc_agg2 <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)),na.rm = TRUE),
-                    ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)), na.rm = TRUE)), 
+mc_assert_no_missing(scc, c("tropoz_pollution", "dam"), paste0("SCC-no-SRM computed costs chunk ", n_chunk))
+scc_agg2 <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))),
+                    ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
                 by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
 scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time","pulse_size"), with = FALSE], by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
 scc_agg2[, scc_nosrm := (damnpv + ozpnpv) / pulse_size]
-scc_agg2 <- unique(scc_agg2)
+mc_assert_no_missing(scc_agg2, c("ID", "gas", "pulse_size", "scc_nosrm"), paste0("SCC-no-SRM output chunk ", n_chunk))
+mc_assert_unique_key(scc_agg2, c("ID", "gas"), paste0("SCC-no-SRM output chunk ", n_chunk))
+mc_assert_key_set_equal(expected_chunk_keys, unique(scc_agg2[, .(ID = as.character(ID), gas = as.character(gas))]),
+                        c("ID", "gas"), paste0("SCC-no-SRM output chunk ", n_chunk))
 
 # combine results: a single experiment's NPC, no probability weighting
 combined <- res_sel[, c(all_names, "source", "cost"), with = FALSE]
-replace_num_na0(combined)
+mc_assert_no_missing(combined, c("ID", "gas", "source", "cost"), paste0("NPC long output chunk ", n_chunk))
 if (nrow(combined) == 0L) {
   stop(
     paste0(
@@ -497,6 +542,10 @@ if (length(missing_sources) > 0L) {
 }
 combined_wide <- merge(combined_wide, unique(pulse_size), by = intersect(names(combined_wide), names(pulse_size)), all.x = TRUE)
 combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / pulse_size]
+mc_assert_no_missing(combined_wide, c("ID", "gas", "pulse_size", "npc_srm"), paste0("NPC output chunk ", n_chunk))
+mc_assert_unique_key(combined_wide, c("ID", "gas"), paste0("NPC output chunk ", n_chunk))
+mc_assert_key_set_equal(expected_chunk_keys, unique(combined_wide[, .(ID = as.character(ID), gas = as.character(gas))]),
+                        c("ID", "gas"), paste0("NPC output chunk ", n_chunk))
 
 # ----------------------------
 # Save final output (combined table)

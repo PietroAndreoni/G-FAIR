@@ -31,14 +31,24 @@ if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .utils)))
   .utils <- file.path(dirname(.sp), .utils)
 source(.utils)
 
+.mc_utils <- "montecarlo_utils.R"
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
+  .mc_utils <- file.path(dirname(.sp), .mc_utils)
+source(.mc_utils)
+
 # logical
 overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
 main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
-diagnostics = ifelse(is.null(opts[["diagnostics"]]), T, as.logical(opts["diagnostics"]) )
+diagnostics = ifelse(is.null(opts[["diagnostics"]]), F, as.logical(opts["diagnostics"]) )
 
 # numeric
-n_scenarios = ifelse(is.null(opts[["n"]]), 10000, as.numeric(opts["n"]) )
+n_scenarios = ifelse(is.null(opts[["n"]]), 8096, as.numeric(opts["n"]) )
 seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
+if (length(n_scenarios) != 1 || is.na(n_scenarios) || n_scenarios < 1 || n_scenarios != floor(n_scenarios)) {
+  stop("-n must be a positive integer")
+}
+n_scenarios <- as.integer(n_scenarios)
+if (length(seed) != 1 || is.na(seed)) stop("--seed must be an integer")
 
 # strings
 res = ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o"]) )
@@ -69,11 +79,14 @@ set.seed(seed)
 if (overwrite_data==T | !file.exists(paste0(res,"/id_montecarlo.csv"))) {
     data <- data.frame()
   } else {
-    data <-  as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv")) ) %>% select(-X)
-    write.csv(data,file=paste0(res,"/id_montecarlo_copy.csv")) # story a copy of previous version database
+    data <- mc_strip_csv_index(as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"), stringsAsFactors = FALSE)))
+    validate_id_montecarlo(data, paste0(res, "/id_montecarlo.csv"))
+    write.csv(data, file=paste0(res,"/id_montecarlo_copy.csv"), row.names = FALSE) # store a copy of previous version database
   }
-  
-max_id <- nrow(data)
+
+max_id <- if (nrow(data) == 0) 0L else max(as.integer(data$ID), na.rm = TRUE)
+start_draw_index <- if (nrow(data) == 0) 1L else max(as.integer(data$draw_index), na.rm = TRUE) + 1L
+end_draw_index <- start_draw_index + as.integer(n_scenarios) - 1L
 
 # Joint lognormal sampling for climate parameters
 # as in FAIR v1.3
@@ -104,8 +117,8 @@ start_choices      <- seq(2025,2100,by=25)
 # h is drawn log-uniform on [hazard_lo, hazard_hi]; this range is chosen so the
 # implied median termination delay, ln(0.5)/ln(1-h), is long enough to span the
 # analysed run (~700 yr at h=1e-3 down to ~7 yr at h=1e-1).
-hazard_lo <- 1e-3
-hazard_hi <- 1e-1
+hazard_lo <- MC_HAZARD_LO
+hazard_hi <- MC_HAZARD_HI
 
 # FAIR analysis horizon, in model-year units (t=1 is calendar 2020). FAIR solves
 # t=1..1000, but post-processing keeps only t<=480 (the projection window
@@ -114,7 +127,7 @@ hazard_hi <- 1e-1
 # in experiments/srm.gms); censoring it at t_horizon means a termination in the
 # last analysed year leaves no post-termination period, i.e. "no termination
 # within the run". Keep this in sync with the t<=480 cut in Analyze.
-t_horizon <- 480
+t_horizon <- MC_T_HORIZON
 
 # Map uniform (0,1) draws onto an equally-weighted discrete grid (inverse CDF).
 map_discrete <- function(u, choices) {
@@ -133,6 +146,9 @@ map_discrete <- function(u, choices) {
 n_dim <- 19
 
 if (sampling_method == "sobol") {
+  if (!mc_is_power_of_two(n_scenarios)) {
+    warning("Sobol sample size is not a power of two; balance guarantees are strongest at powers of two.", call. = FALSE)
+  }
   # Owen-scrambled Sobol sequence (randomized QMC). qrng delegates Owen
   # scrambling to spacefillr, so both packages are required. Scrambling keeps
   # the low-discrepancy structure while randomizing the net: `seed` therefore
@@ -141,13 +157,18 @@ if (sampling_method == "sobol") {
   for (pkg in c("spacefillr","qrng")) {
     if (!requireNamespace(pkg, quietly=TRUE)) install.packages(pkg, repos="http://cloud.r-project.org")
   }
-  unit_draws <- qrng::sobol(n=n_draws, d=n_dim, randomize="Owen", seed=seed)
+  unit_draws_all <- qrng::sobol(n=end_draw_index, d=n_dim, randomize="Owen", seed=seed)
+  unit_draws <- unit_draws_all[seq.int(start_draw_index, end_draw_index), , drop = FALSE]
 } else if (sampling_method == "montecarlo") {
-  # Plain Monte Carlo: independent pseudo-random uniforms.
-  unit_draws <- matrix(runif(n_draws * n_dim), ncol=n_dim)
+  # Plain Monte Carlo: independent pseudo-random uniforms. Generate through
+  # end_draw_index and keep only the append tail so repeated appends with the
+  # same seed never reuse earlier uniforms.
+  unit_draws_all <- matrix(runif(end_draw_index * n_dim), ncol=n_dim)
+  unit_draws <- unit_draws_all[seq.int(start_draw_index, end_draw_index), , drop = FALSE]
 } else {
   stop("--method must be 'sobol' or 'montecarlo'")
 }
+unit_draw_indices <- seq.int(start_draw_index, end_draw_index)
 
 # Transform uniforms into the correlated joint lognormal (ecs, tcr) marginals.
 draw_joint_ecs_tcr <- function(u_mat) {
@@ -157,6 +178,32 @@ draw_joint_ecs_tcr <- function(u_mat) {
     ecs = exp(ecs_par$mu + ecs_par$sigma * z_joint[,1]),
     tcr = exp(tcr_par$mu + tcr_par$sigma * z_joint[,2])
   )
+}
+
+draw_replacement_ecs_tcr <- function(draw_indices, iter) {
+  old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+    get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  } else {
+    NULL
+  }
+  on.exit({
+    if (is.null(old_seed)) {
+      if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+        rm(".Random.seed", envir = .GlobalEnv)
+      }
+    } else {
+      assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+
+  redraw_u <- matrix(NA_real_, nrow = length(draw_indices), ncol = 2)
+  for (j in seq_along(draw_indices)) {
+    redraw_seed <- as.integer((as.numeric(seed) +
+      as.numeric(draw_indices[j]) * 10007 + iter * 104729) %% .Machine$integer.max)
+    set.seed(redraw_seed)
+    redraw_u[j, ] <- runif(2)
+  }
+  draw_joint_ecs_tcr(redraw_u)
 }
 
 joint_draw <- draw_joint_ecs_tcr(unit_draws[, 1:2, drop=FALSE])
@@ -173,29 +220,26 @@ while (length(invalid) > 0) {
   if (iter > 10000) {
     stop("Unable to obtain n_draws with ecs > tcr after repeated redraws.")
   }
-  redraw <- draw_joint_ecs_tcr(matrix(runif(length(invalid) * 2), ncol=2))
+  redraw <- draw_replacement_ecs_tcr(unit_draw_indices[invalid], iter)
   ecs_draw[invalid] <- redraw$ecs
   tcr_draw[invalid] <- redraw$tcr
   invalid <- which(round(ecs_draw * 10, 0) <= round(tcr_draw * 10, 0))
 }
 
 # Per-year termination hazard (col 12) and the termination delay it induces
-# (col 8). Given hazard h, the delay D since deployment is geometric; we draw it
-# with the continuous-time inverse CDF D = ln(1-u)/ln(1-h) on its own Sobol
-# coordinate and round to a whole model-year (>= 1). prob stores the hazard
-# itself (4 sig figs), used unrounded here so term_delta and the stored prob
-# stay mutually consistent.
-hazard <- signif(exp(qunif(unit_draws[,12], log(hazard_lo), log(hazard_hi))), 4)
-term_delay <- pmax(round(log1p(-unit_draws[,8]) / log1p(-hazard)), 1)
+# (col 8). Given hazard h, the delay D since deployment is geometric on yearly
+# support {1, 2, ...}; use the discrete inverse CDF, not a rounded continuous
+# approximation. prob stores the same raw hazard used to draw term_delay.
+hazard <- exp(qunif(unit_draws[,12], log(hazard_lo), log(hazard_hi)))
+term_delay <- mc_geometric_delay(unit_draws[,8], hazard)
 
 # Absolute termination time (model-year index) = deployment year + delay,
 # censored at the FAIR horizon. term_delta == t_horizon is the "no termination
 # within the run" outcome. pulse is drawn here too so term_delta can fold it in.
 pulse_draw <- map_discrete(unit_draws[,4], pulse_choices)
-term_delta_draw <- pmin(pulse_draw + term_delay, t_horizon)
+term_delta_draw <- mc_term_delta(pulse_draw, term_delay, t_horizon)
 
 new_data <- data.frame(
-  ID = max_id + seq_len(n_draws),
   # --- FAIR-run parameters ---
   ecs = round(ecs_draw * 10, 0),
   tcr = round(tcr_draw * 10, 0),
@@ -205,6 +249,7 @@ new_data <- data.frame(
   term = map_discrete(unit_draws[,6], term_choices),
   start = map_discrete(unit_draws[,7], start_choices),
   term_delta = term_delta_draw,   # absolute termination year (deployment + geometric delay, censored at horizon)
+  term_delay = term_delay,
   # --- post-processing parameters (moved from Analyze_montecarlo.R) ---
   theta           = round(qlnorm_fit_trunc(unit_draws[,9], lo=0, hi=90, median=10, q5=3, q95=30), 0),
   alpha           = round(qlnorm_fit(unit_draws[,10], median=0.00575, sd=0.00575*382/179), 4),
@@ -217,27 +262,41 @@ new_data <- data.frame(
   vsl             = round(qunif(unit_draws[,17], 7.5, 13.6), 0) * 1e6,
   vsl_eta         = round(qunif(unit_draws[,18], 0.35, 1.05), 1),  # +/- half a 0.1 step so edges 0.4/1.0 get a full bin
   dg              = round(qnorm_fit(unit_draws[,19], median=0.015, sd=0.005), 3),
+  sampler_version = MC_SAMPLER_VERSION,
+  sampling_method = sampling_method,
+  seed            = seed,
+  censored_termination = mc_censored_termination(pulse_draw, term_delay, t_horizon),
   stringsAsFactors = FALSE
 )
 
-data <- data %>% bind_rows(new_data)
-  
-data <- data %>%
+new_data <- new_data %>%
     mutate(term=ifelse(cool==0,2700,term),
-           start=ifelse(cool==0,2700,start) ) %>%
-    unique()
+           start=ifelse(cool==0,2700,start) )
   
 if (main_scenario==T) {
-    data <- rbind(data %>%
+    new_data <- rbind(new_data %>%
                     mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=5 ),
-                  data %>%
+                  new_data %>%
                     mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=30 ) )
     # Fix the post-processing parameters for the deterministic main scenario
     # (previously applied in Analyze_montecarlo.R).
-    data <- data %>% mutate(vsl = 10 * 1e6, delta = 0.02, vsl_eta = 1)
-    if (!keep_theta_uncertain) data <- data %>% mutate(theta = base_theta) }
+    new_data <- new_data %>% mutate(vsl = 10 * 1e6, delta = 0.02, vsl_eta = 1)
+    if (!keep_theta_uncertain) new_data <- new_data %>% mutate(theta = base_theta) }
+
+new_data <- new_data %>%
+  mutate(
+    term_delta = mc_term_delta(pulse, term_delay, t_horizon),
+    censored_termination = mc_censored_termination(pulse, term_delay, t_horizon),
+    ID = max_id + seq_len(n()),
+    draw_index = start_draw_index + seq_len(n()) - 1L
+  ) %>%
+  select(ID, all_of(MC_FAIR_COLS), all_of(MC_POST_COLS), all_of(MC_METADATA_COLS))
+
+validate_id_montecarlo(new_data, "new Monte Carlo realizations")
+data <- data %>% bind_rows(new_data)
+validate_id_montecarlo(data, paste0(res, "/id_montecarlo.csv"))
   
-write.csv(data,file=paste0(res,"/id_montecarlo.csv"))
+write.csv(data,file=paste0(res,"/id_montecarlo.csv"), row.names = FALSE)
 
 # ---------------------------------------------------------------------------
 # Optional diagnostics: compare the freshly drawn marginals (new_data) against
@@ -365,19 +424,20 @@ if (diagnostics == T) {
   # acts on directly: term_delta itself is the absolute year (pulse + delay,
   # censored at the horizon), so we validate the underlying delay here. Each
   # realization's delay is geometric with that realization's own hazard h, and h
-  # is log-uniform, so the marginal is the log-uniform mixture of exponentials
-  # (computed below by averaging over a fine h grid). The delay is shown censored
-  # at t_horizon to mirror the run: the upper clamp piles the "no termination
-  # within the run" tail onto the horizon, so expect the histogram to spike and
-  # the Q-Q to flatten there (annotated) while the bulk tracks the curve.
+  # is log-uniform, so the marginal is the log-uniform mixture of geometrics.
+  # The delay is shown censored at t_horizon to mirror the run.
   .hgrid   <- exp(seq(log(hazard_lo), log(hazard_hi), length.out = 512))
-  .lamgrid <- -log1p(-.hgrid)                       # exponential rate per hazard
-  d_delay  <- function(d) vapply(d, function(z) mean(.lamgrid * exp(-.lamgrid * z)), numeric(1))
-  p_delay  <- function(d) vapply(d, function(z) mean(1 - exp(-.lamgrid * z)), numeric(1))
-  .dg <- c(0, exp(seq(log(0.5), log(1e4), length.out = 4000)))  # dense grid to invert the CDF
+  d_delay  <- function(d) {
+    vapply(d, function(z) {
+      k <- pmax(as.integer(round(z)), 1L)
+      mean(.hgrid * (1 - .hgrid)^(k - 1L))
+    }, numeric(1))
+  }
+  p_delay  <- function(d) vapply(d, function(z) mean(1 - (1 - .hgrid)^floor(z)), numeric(1))
+  .dg <- seq_len(t_horizon)
   .pg <- p_delay(.dg)
   q_delay  <- function(pp) approx(.pg, .dg, xout = pp, rule = 2)$y
-  delay_plot <- pmin(term_delay, t_horizon)         # term_delay is the uncensored draw, in scope above
+  delay_plot <- pmin(new_data$term_delay, t_horizon)
   diag_panel(delay_plot, d_delay, q_delay,
              "termination delay (LogUnif-hazard mixture of geometrics)",
              note = sprintf("%.1f%% censored at t_horizon=%d (no termination in run): hist spike & Q-Q flatten there",
@@ -395,4 +455,3 @@ if (diagnostics == T) {
   dev.off()
   cat("Diagnostics written to", pdf_path, "\n")
 }
-
