@@ -31,6 +31,13 @@ if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
   .mc_utils <- file.path(dirname(.sp), .mc_utils)
 source(.mc_utils)
 
+# Single control file for every hard-coded input / constant (also pulled in
+# transitively by montecarlo_utils.R; sourced explicitly here for clarity).
+.all_params <- "all_parameters.R"
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
+
 # extract names function rewritten using data.table/vector ops
 extract_names_dt <- function(files_vec) {
   DT <- data.table(gdx = files_vec)
@@ -51,10 +58,10 @@ extract_names_dt <- function(files_vec) {
 
 sanitize_dt <- function(DT) {
   setDT(DT)
-  # ensure t numeric and <=480, drop gdx
+  # ensure t numeric and <= T_HORIZON, drop gdx
   if("t" %in% names(DT)) DT[, t := as.numeric(t)]
   if("gdx" %in% names(DT)) DT <- DT[, !"gdx", with = FALSE]
-  DT <- DT[ t <= 480 ]
+  DT <- DT[ t <= T_HORIZON ]
   DT <- unique(DT)
   return(DT)
 }
@@ -68,14 +75,16 @@ replace_num_na0 <- function(DT) {
 }
 
 # vectorized gwpt computation
-compute_gwpt <- function(DT, dg_col = "dg", t_col = "t", gwp_max = 15) {
-  # gwpt = pmin(gwp * (1+dg)^(280-1), gwp * (1+dg)^(t-1))
-  DT[t <= 80, gwpt := pmin(gwp * gwp_max,
+# Cumulative GDP path, capped at GWP_INITIAL * GWP_MAX (default 15x). Growth uses
+# dg until model-year DG_DECAY_T1, dg/2 until DG_DECAY_T2, then dg/4 thereafter.
+compute_gwpt <- function(DT, dg_col = "dg", t_col = "t", gwp_max = GWP_MAX) {
+  t1 <- DG_DECAY_T1; t2 <- DG_DECAY_T2
+  DT[t <= t1, gwpt := pmin(gwp * gwp_max,
                     gwp * (1 + dg)^(t-1))]
-  DT[t > 80 & t <= 180, gwpt := pmin(gwp * gwp_max,
-                  gwp * (1 + dg)^(80-1) * (1 + dg/2)^(t-80))]
-  DT[t > 180, gwpt := pmin(gwp * gwp_max,
-                           gwp * (1 + dg)^(80-1) * (1 + dg/2)^(180-80) * (1 + dg/4)^(t-180))]
+  DT[t > t1 & t <= t2, gwpt := pmin(gwp * gwp_max,
+                  gwp * (1 + dg)^(t1-1) * (1 + dg/2)^(t-t1))]
+  DT[t > t2, gwpt := pmin(gwp * gwp_max,
+                           gwp * (1 + dg)^(t1-1) * (1 + dg/2)^(t2-t1) * (1 + dg/4)^(t-t2))]
 }
 
 npv_aggregator <- function(DT, keep_names = all_names) {
@@ -104,6 +113,36 @@ npv_aggregator <- function(DT, keep_names = all_names) {
     variable.name = "source",
     value.name = "cost")
   return(res_long)
+}
+
+make_scc_diagnostics <- function(DT, key_cols, value_cols, context) {
+  mc_assert_no_missing(DT, c(key_cols, "t", value_cols),
+                       paste0(context, " diagnostics inputs"))
+  diag <- DT[, list(
+    observed_years = .N,
+    min_t = min(as.numeric(t)),
+    max_t = max(as.numeric(t))
+  ), by = key_cols]
+
+  for (cname in value_cols) {
+    stats <- DT[, list(
+      stat_min = min(get(cname), na.rm = TRUE),
+      stat_max = max(get(cname), na.rm = TRUE),
+      stat_mean = mean(get(cname), na.rm = TRUE),
+      stat_negative_years = sum(get(cname) < 0, na.rm = TRUE),
+      stat_zero_years = sum(get(cname) == 0, na.rm = TRUE),
+      stat_nonfinite_years = sum(!is.finite(get(cname)))
+    ), by = key_cols]
+    setnames(
+      stats,
+      c("stat_min", "stat_max", "stat_mean",
+        "stat_negative_years", "stat_zero_years", "stat_nonfinite_years"),
+      paste0(cname, c("_min", "_max", "_mean",
+                      "_negative_years", "_zero_years", "_nonfinite_years"))
+    )
+    diag <- merge(diag, stats, by = key_cols, all = TRUE)
+  }
+  diag
 }
 
 # NOTE: the post-processing uncertainties (theta, alpha, delta, prob,
@@ -224,6 +263,8 @@ output_folder <- ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o
 # modes don't append into the same file.
 run_termination = ifelse(is.null(opts[["termination"]]), T, as.logical(opts["termination"]) )
 name_output <- if (run_termination) "npc_output.csv" else "npc_noterm_output.csv"
+scc_diag_output <- paste0("scc_diag_", str_remove(name_output, "npc_"))
+sccnosrm_diag_output <- paste0("sccnosrm_diag_", str_remove(name_output, "npc_"))
 
 
 # Make sure the output folder exists (create it if not)
@@ -239,16 +280,15 @@ N = ifelse(is.null(opts[["chunk"]]), 100, as.integer(opts["chunk"]) )
 skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) )
 
 if(run_hpc==F) {igdx()} else {
-  igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")
+  igdx(HPC_GAMS_PATH)
   logfile <- file(file.path(output_folder,"r_console.log"), open = "wt")
   sink(logfile)
   sink(logfile, type = "message")  # capture warnings/errors too
 }
 
-## climate damage function parameters
-gwp <- 85.28*1e12*1.085 # initial world gdp: 2019 from world bank (constant 2015 USD to 2020)
-#forctoTg <- 1/0.2 # from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5897825/ 
-globaltouspc <- 1.82 * 10937 / 63515 # ratio between global GDPc and USgdpc in 2020, adjusted to match McDuffie 2023 
+## climate damage function parameters (defined in all_parameters.R)
+gwp <- GWP_INITIAL      # initial world gdp: 2019 World Bank (constant 2015 USD -> 2020)
+globaltouspc <- GLOBAL_TO_US_PC  # ratio of global to US per-capita GDP (2020, McDuffie 2023)
 #forctoUSD <- forctoTg * TgtoUSD # US$/(W/m^2)
 #ozone_rftoconc <- 50 / 0.263  # 50 ppb as https://www.sciencedirect.com/science/article/pii/S2542519622002601?ref=pdf_download&fr=RR-2&rr=9a07c2002fcb708b
 
@@ -338,6 +378,8 @@ if(file.exists(file.path(output_folder, name_output))) {
     file.remove(file.path(output_folder, name_output))
     file.remove(file.path(output_folder, paste0("scc_",str_remove(name_output,"npc_"))) )
     file.remove(file.path(output_folder, paste0("sccnosrm_",str_remove(name_output,"npc_"))) )
+    file.remove(file.path(output_folder, scc_diag_output))
+    file.remove(file.path(output_folder, sccnosrm_diag_output))
   } else {
     if (!all(c("ID", "gas") %in% names(existing_output))) {
       stop("Existing ", name_output, " is legacy output without ID/gas keys. Rerun with --skip=F to replace it.")
@@ -395,7 +437,7 @@ if (length(files_loop) == 0) next     # skip loop iteration
 cat("Loading the data for experiments", n_chunk, "to", n_chunk+N, "from a total of", nrow(all_experiments), "experiments...\n")
 
 # create full grid to handle missing data
-all_t <- seq(1,480)  # or tot_forcing$t
+all_t <- seq(1, T_HORIZON)  # or tot_forcing$t
 all_scenarios <- unique(sanitized_names[gdx %in% files_loop, ..scenario_names])  # all scenario combinations
 
 # Create the full grid
@@ -442,6 +484,10 @@ cat("Analyzing the data... \n")
 selected_experiment <- if (run_termination) "srmpulsemaskedterm" else "srmpulsemasked"
 dt_sel <- prepare_join_table(selected_experiment)
 dt_sel <- dt_sel[ t >= as.numeric(pulse_time) ]
+mc_assert_key_set_equal(expected_chunk_keys, unique(dt_sel[, .(ID = as.character(ID), gas = as.character(gas))]),
+                        c("ID", "gas"), paste0("NPC selected input chunk ", n_chunk))
+mc_assert_complete_time_window(dt_sel, c("ID", "gas"),
+                               paste0("NPC selected input chunk ", n_chunk))
 res_sel <- npv_aggregator(dt_sel, all_names)
 
 # pulse_size & scc (reuse earlier approach but modularized)
@@ -461,19 +507,40 @@ scc <- merge(
 )
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE)
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_base = value)],  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
-mc_assert_no_missing(scc, c("temp_srm", "temp_srmpulse", "concch4_pulse", "concch4_base"),
+scc <- merge(scc, tot_forcing[experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, forc_srm = value)],
+             by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
+scc <- merge(scc, tot_forcing[experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, forc_srmpulse = value)],
+             by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
+mc_assert_no_missing(scc, c("temp_srm", "temp_srmpulse", "concch4_pulse", "concch4_base",
+                            "forc_srm", "forc_srmpulse"),
                      paste0("SCC-with-SRM climate inputs chunk ", n_chunk))
 scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm","forctoTg"), with = FALSE], by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
 mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
                      paste0("SCC-with-SRM Monte Carlo inputs chunk ", n_chunk))
 scc <- scc[ t >= as.numeric(pulse_time) ]
+scc[, `:=`(
+  dtemp_srmpulse_srm = temp_srmpulse - temp_srm,
+  dforc_srmpulse_srm = forc_srmpulse - forc_srm
+)]
+mc_assert_key_set_equal(expected_chunk_keys, unique(scc[, .(ID = as.character(ID), gas = as.character(gas))]),
+                        c("ID", "gas"), paste0("SCC-with-SRM input chunk ", n_chunk))
+mc_assert_complete_time_window(scc, c("ID", "gas"),
+                               paste0("SCC-with-SRM input chunk ", n_chunk))
+scc_by <- c("gas", intersect(names(scc), names(id_montecarlo)))
+scc_diag <- make_scc_diagnostics(
+  scc,
+  scc_by,
+  c("forc_srm", "forc_srmpulse", "dforc_srmpulse_srm",
+    "temp_srm", "temp_srmpulse", "dtemp_srmpulse_srm"),
+  paste0("SCC-with-SRM chunk ", n_chunk)
+)
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
 mc_assert_no_missing(scc, c("tropoz_pollution", "dam"), paste0("SCC-with-SRM computed costs chunk ", n_chunk))
 scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))),
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
-                by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
+                by = scc_by ]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
 scc_agg[, scc := (damnpv + ozpnpv) / pulse_size]
 mc_assert_no_missing(scc_agg, c("ID", "gas", "pulse_size", "scc"), paste0("SCC-with-SRM output chunk ", n_chunk))
@@ -489,7 +556,12 @@ scc <- merge(
 )
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","pulse_time"), all = FALSE)
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "base", .(t, rcp, ecs, tcr, concch4_base = value)],  by = c("t","rcp","ecs","tcr"), all.x = TRUE)
-mc_assert_no_missing(scc, c("temp_base", "temp_pulse", "concch4_pulse", "concch4_base"),
+scc <- merge(scc, tot_forcing[experiment == "base", .(t, rcp, ecs, tcr, forc_base = value)],
+             by = c("t","rcp","ecs","tcr"), all.x = TRUE)
+scc <- merge(scc, tot_forcing[experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, forc_pulse = value)],
+             by = c("t","gas","rcp","ecs","tcr","pulse_time"), all.x = TRUE)
+mc_assert_no_missing(scc, c("temp_base", "temp_pulse", "concch4_pulse", "concch4_base",
+                            "forc_base", "forc_pulse"),
                      paste0("SCC-no-SRM climate inputs chunk ", n_chunk))
 scc <- merge(scc, id_montecarlo[, c("ID","ecs","tcr","rcp","pulse_time","alpha","delta",
                                     "mortality_ozone","vsl","vsl_eta","dg",
@@ -499,13 +571,29 @@ scc <- merge(scc, id_montecarlo[, c("ID","ecs","tcr","rcp","pulse_time","alpha",
 mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
                      paste0("SCC-no-SRM Monte Carlo inputs chunk ", n_chunk))
 scc <- scc[ t >= as.numeric(pulse_time) ]
+scc[, `:=`(
+  dtemp_pulse_base = temp_pulse - temp_base,
+  dforc_pulse_base = forc_pulse - forc_base
+)]
+mc_assert_key_set_equal(expected_chunk_keys, unique(scc[, .(ID = as.character(ID), gas = as.character(gas))]),
+                        c("ID", "gas"), paste0("SCC-no-SRM input chunk ", n_chunk))
+mc_assert_complete_time_window(scc, c("ID", "gas"),
+                               paste0("SCC-no-SRM input chunk ", n_chunk))
+scc_nosrm_by <- c("gas", intersect(names(scc), names(id_montecarlo)))
+scc_nosrm_diag <- make_scc_diagnostics(
+  scc,
+  scc_nosrm_by,
+  c("forc_base", "forc_pulse", "dforc_pulse_base",
+    "temp_base", "temp_pulse", "dtemp_pulse_base"),
+  paste0("SCC-no-SRM chunk ", n_chunk)
+)
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
 scc[, dam := gwpt * ( alpha * (pmax(0,temp_pulse)^2 - pmax(0,temp_base)^2) )]
 mc_assert_no_missing(scc, c("tropoz_pollution", "dam"), paste0("SCC-no-SRM computed costs chunk ", n_chunk))
 scc_agg2 <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))),
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
-                by = c("gas",intersect(names(scc), names(id_montecarlo))) ]
+                by = scc_nosrm_by ]
 scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time","pulse_size"), with = FALSE], by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
 scc_agg2[, scc_nosrm := (damnpv + ozpnpv) / pulse_size]
 mc_assert_no_missing(scc_agg2, c("ID", "gas", "pulse_size", "scc_nosrm"), paste0("SCC-no-SRM output chunk ", n_chunk))
@@ -553,6 +641,8 @@ mc_assert_key_set_equal(expected_chunk_keys, unique(combined_wide[, .(ID = as.ch
 fwrite(combined_wide, file = file.path(output_folder, name_output), append = TRUE)
 fwrite(scc_agg, file = file.path(output_folder, paste0("scc_",str_remove(name_output,"npc_") )), append = TRUE)
 fwrite(scc_agg2, file = file.path(output_folder, paste0("sccnosrm_",str_remove(name_output,"npc_"))), append = TRUE)
+fwrite(scc_diag, file = file.path(output_folder, scc_diag_output), append = TRUE)
+fwrite(scc_nosrm_diag, file = file.path(output_folder, sccnosrm_diag_output), append = TRUE)
 
 }
 

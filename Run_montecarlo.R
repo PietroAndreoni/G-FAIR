@@ -30,6 +30,13 @@ if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
   .mc_utils <- file.path(dirname(.sp), .mc_utils)
 source(.mc_utils)
 
+# Single control file for every hard-coded input / constant (also pulled in
+# transitively by montecarlo_utils.R; sourced explicitly here for clarity).
+.all_params <- "all_parameters.R"
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
+
 # logical
 run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
 run_hpc = ifelse(is.null(opts[["hpc"]]), F, as.logical(opts["hpc"]) )
@@ -44,7 +51,7 @@ end_job = ifelse(is.null(opts[["e"]]), 100000, as.numeric(opts["e"]) )
 # strings
 res = ifelse(is.null(opts[["res"]]), "Results_montecarlo", as.character(opts["res"]) )
 input = ifelse(is.null(opts[["i"]]), "Montecarlo", as.character(opts["i"]) )
-which_queue = ifelse(is.null(opts[["q"]]), "p_short", as.character(opts["q"]) )
+which_queue = ifelse(is.null(opts[["q"]]), HPC_QUEUE, as.character(opts["q"]) )
 
 # Make sure the file exists (create it if not)
 if (!dir.exists(res)) {
@@ -73,7 +80,7 @@ known_results <- tools::file_path_sans_ext(filelist)
 
 scenarios_launched <- 0
 problematic_data <- data.frame()
-if(main_scenario==T) gases <- c("ch4") else gases <- c("ch4","co2")
+if(main_scenario==T) gases <- GASES_MAIN else gases <- GASES_FULL
 
 last_job <- min(end_job,nrow(data))
 if (start_job > last_job) stop("No scenarios to run in the requested start/end range after filtering.")
@@ -83,7 +90,7 @@ for (i in seq.int(start_job,last_job) ) {
 for (gas in gases) {
     
 bsub <- paste("bsub", "-q",which_queue, "-n 1",
-              "-P 0638", paste0("-J scenariosrmpulse", i,"_gas",gas), "-K -M 2G")
+              paste0("-P ", HPC_PROJECT), paste0("-J scenariosrmpulse", i,"_gas",gas), paste0("-K -M ", HPC_MEMORY))
 
 gams <- paste0("gams FAIR.gms --experiment=srm",
                " --gas=",gas,
@@ -92,10 +99,10 @@ gams <- paste0("gams FAIR.gms --experiment=srm",
               " --rcp=",data[i,]$rcp,
               " --pulse_time=",data[i,]$pulse,
               " --rate_of_cooling=",data[i,]$cool,
-              " --start_rampdown=",data[i,]$term-100,
+              " --start_rampdown=",data[i,]$term-RAMP_DOWN_YEARS,
               " --end_rampdown=",data[i,]$term,
               " --start_rampup=",data[i,]$start,
-              " --end_rampup=",data[i,]$start+100,
+              " --end_rampup=",data[i,]$start+RAMP_UP_YEARS,
               " --termination_time=",data[i,]$term_delta,
               " --results_folder=",res)
 
@@ -129,7 +136,7 @@ if (!results_name %in% known_results ) {
   
     if(!is.null(attr(ret,"status")) )  {
     
-        if(attr(ret,"status")!=112) {
+        if(attr(ret,"status")!=SOLVE_OK_STATUS) {
         
           cat("Careful! scenario",i,"with gas",gas,"couldn't solve...\n")
           problematic_data <- problematic_data %>% 

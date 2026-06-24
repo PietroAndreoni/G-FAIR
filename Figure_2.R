@@ -1,13 +1,22 @@
 library(tidyverse)
-output_folder <- "C:/Users/Andreoni/OneDrive - The University of Chicago/G-FAIR/Results_1903"
-damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv)) 
+
+# Single control file for plotting settings / result folders. Resolve relative to
+# this script if launched via Rscript, else assume the project working directory.
+.all_params <- "all_parameters.R"
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
+
+output_folder <- RESULTS_FOLDER_MAIN
+damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv))
 scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output")), read.csv)) %>% rename(scc=scc_nosrm)
 scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output")), read.csv)) %>% rename(scc_srm=scc)
 all_cols <- names(damnpv)[1:20]
-remove_outliers <- c("ecs","tcr","alpha","theta","mortality_srm","mortality_ozone","dg","TgtoUSD","forctoTg")
-check_densities <- damnpv %>% 
-  filter(gas=="co2") %>% 
-  filter_at(remove_outliers, ~ (.x <= quantile(.x, 0.999, na.rm = TRUE) & .x >= quantile(.x, 0.001, na.rm = TRUE) ) ) %>% 
+remove_outliers <- FIG_OUTLIER_COLS
+check_densities <- damnpv %>%
+  filter(gas=="co2") %>%
+  filter_at(remove_outliers, ~ (.x <= quantile(.x, FIG_OUTLIER_QHI, na.rm = TRUE) & .x >= quantile(.x, FIG_OUTLIER_QLO, na.rm = TRUE) ) ) %>%
   select_at(setdiff(all_cols,c("gas") ))
 check_densities %>% 
   select_at(remove_outliers) %>% 
@@ -79,7 +88,7 @@ stats::ks.test(damnorm %>% filter(gas=="co2") %>% pull(npc_std),
 quantile(damnpv %>% filter(gas=="co2") %>% pull(npc_srm), 0.99)/quantile(damnpv %>% filter(gas=="co2") %>% pull(npc_srm), 0.95)
 quantile(damnpv %>% filter(gas=="ch4") %>% pull(npc_srm), 0.99)/quantile(damnpv %>% filter(gas=="ch4") %>% pull(npc_srm), 0.95)
 
-adjust_opt <- log(1.06 * sd(damnorm$npc_std)*(length(damnorm$npc_std))^(-1/5))
+adjust_opt <- log(FIG_KDE_BW_CONST * sd(damnorm$npc_std)*(length(damnorm$npc_std))^(FIG_KDE_BW_POW))
 pow10_labels <- scales::label_math(10^.x)
 
 density_plot <- ggplot(damnorm) +
@@ -102,10 +111,10 @@ gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="ch4" & npc_srm<=quantile(np
 
 stat_analysis_ch4 <- ot_indices_1d(gsoat_data %>% select(-npc_srm, -npc_norm),
                                    log10(gsoat_data %>% pull(npc_norm)), 
-                                   M= 15,
-                                   boot = T,
-                                   R = 100)
-lowerbound_ch4 <- irrelevance_threshold(log10(gsoat_data %>% pull(npc_norm)), M= 15, solver="1d")
+                                   M= GSA_M,
+                                   boot = GSA_BOOT,
+                                   R = GSA_R)
+lowerbound_ch4 <- irrelevance_threshold(log10(gsoat_data %>% pull(npc_norm)), M= GSA_M, solver="1d")
 
 gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="co2") %>%   
   select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-npc_std)
@@ -113,10 +122,10 @@ gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="co2") %>%
 stat_analysis_co2 <- ot_indices_1d(gsoat_data %>% 
                                      select(-npc_srm, -npc_norm),
                                    log10(gsoat_data %>% pull(npc_norm)), 
-                                   M= 15,
-                                   boot = T,
-                                   R = 100)
-lowerbound_co2 <- irrelevance_threshold(log10(gsoat_data %>% pull(npc_norm)), M= 15, solver="1d")
+                                   M= GSA_M,
+                                   boot = GSA_BOOT,
+                                   R = GSA_R)
+lowerbound_co2 <- irrelevance_threshold(log10(gsoat_data %>% pull(npc_norm)), M= GSA_M, solver="1d")
 
 input_categories <- c("ecs"="Climate",
                       "tcr"="Climate",
@@ -202,16 +211,16 @@ gsoat_data <- damnorm %>% ungroup() %>%
 stat_analysis_diff <- ot_indices_1d(gsoat_data %>% 
                                       select(-diff),
                                     gsoat_data %>% pull(diff), 
-                                    M= 15,
+                                    M= GSA_M,
                                     boot = T,
                                     R = 100)
-lowerbound_diff <- irrelevance_threshold(gsoat_data %>% pull(diff), M= 15, solver="1d")
+lowerbound_diff <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, solver="1d")
 
 data <- data.frame(i=seq(1,1000),irr=NA,sample=NA)
 for(i in seq(1,1000)) {
 data[i,"sample"] <- pmin(nrow(gsoat_data),sample(seq(1000,10000,by=100),1))
-data[i,"irr"] <- irrelevance_threshold(sample(gsoat_data %>% pull(diff),data[i,"sample"]), M= 15, solver="1d")$indices
-data[i,"irr_tot"] <- irrelevance_threshold(gsoat_data %>% pull(diff), M= 15, solver="1d")$indices
+data[i,"irr"] <- irrelevance_threshold(sample(gsoat_data %>% pull(diff),data[i,"sample"]), M= GSA_M, solver="1d")$indices
+data[i,"irr_tot"] <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, solver="1d")$indices
 
  }
 
@@ -240,21 +249,21 @@ damnorm %>%
   geom_abline(slope=1,intercept=0)+ ggpubr::theme_pubr()
 
 dr <- ggplot(damnorm) +
-  geom_smooth(aes(x=delta*100,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=delta*FIG2_DELTA_PCT,y=log10(npc_norm),color=gas),
               method="loess") +
   scale_y_continuous(labels = pow10_labels) +
   xlab("Discount rate [%]") + ylab("Normalized cost") +
   coord_cartesian(ylim = c(-0.5,1) ) + ggpubr::theme_pubr(legend="none")
 
 alpha <- ggplot(damnorm) +
-  geom_smooth(aes(x=alpha*100,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=alpha*FIG2_ALPHA_PCT,y=log10(npc_norm),color=gas),
               method="loess") +
 #  geom_density(aes(x=alpha*100,y=after_stat(scaled))) +
   scale_y_continuous(labels = pow10_labels) +
   xlab(expression("Climate damages [%GDP " * K^-2 * "]")) + ylab("") +
-  coord_cartesian(xlim = c(quantile(damnorm$alpha*100, 0.05, na.rm=TRUE), 
-                           quantile(damnorm$alpha*100, 0.95, na.rm=TRUE)),
-                  ylim = c(-0.5,1) ) + 
+  coord_cartesian(xlim = c(quantile(damnorm$alpha*FIG2_ALPHA_PCT, FIG2_PANEL_QLO, na.rm=TRUE),
+                           quantile(damnorm$alpha*FIG2_ALPHA_PCT, FIG2_PANEL_QHI, na.rm=TRUE)),
+                  ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
 theta <- ggplot(damnorm) +
@@ -263,28 +272,28 @@ theta <- ggplot(damnorm) +
   scale_y_continuous(labels = pow10_labels) +
 #  geom_density(aes(x=theta,y=after_stat(scaled))) +
   xlab("SAI angle [°]") + ylab("") +
-  coord_cartesian(xlim = c(quantile(damnorm$theta, 0.05, na.rm=TRUE), 
-                           quantile(damnorm$theta, 0.95, na.rm=TRUE)),
-                  ylim = c(-0.5,1) ) + 
+  coord_cartesian(xlim = c(quantile(damnorm$theta, FIG2_PANEL_QLO, na.rm=TRUE),
+                           quantile(damnorm$theta, FIG2_PANEL_QHI, na.rm=TRUE)),
+                  ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
 term <- ggplot(damnorm) +
-  geom_smooth(aes(x=2020+term,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=FIG2_TERM_YEAR_BASE+term,y=log10(npc_norm),color=gas),
               method="loess") +
   scale_y_continuous(labels = pow10_labels) +
   xlab("Year of termination") + ylab("") +
-  coord_cartesian(xlim = c(2020,2400),
-                  ylim = c(-0.5,1) ) + 
+  coord_cartesian(xlim = FIG2_TERM_XLIM,
+                  ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
 ecs <- ggplot(damnorm) +
-  geom_smooth(aes(x=ecs/10,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=ecs/FIG2_ECS_TENTHS,y=log10(npc_norm),color=gas),
               method="loess") +
 #  geom_density(aes(x=ecs/10,y=after_stat(scaled))) +
   scale_y_continuous(labels = pow10_labels) +
   xlab("Climate equilibrium sensitivity [K]") + ylab("") +
-  coord_cartesian(xlim = c(quantile(damnorm$ecs/10, 0.05, na.rm=TRUE), 
-                           quantile(damnorm$ecs/10, 0.95, na.rm=TRUE)),
+  coord_cartesian(xlim = c(quantile(damnorm$ecs/FIG2_ECS_TENTHS, FIG2_PANEL_QLO, na.rm=TRUE),
+                           quantile(damnorm$ecs/FIG2_ECS_TENTHS, FIG2_PANEL_QHI, na.rm=TRUE)),
                   ylim = c(-0.5,1)) + ggpubr::theme_pubr(legend="none")
 
 void <- ggplot() + theme_void()
@@ -295,30 +304,31 @@ ggsave("extfig_gsa.png",importances,width=12,height=6,dpi=300)
 ggsave("extfig_gsadiff.png",importance_diff,width=11,height=6,dpi=300)
 ggsave("extfig_fra.png",fraction,width=12,height=6,dpi=300)
 
+if (FALSE) {
+  damnorm %>% filter(gas=="co2" & scc<100) %>%
+    mutate(nosrm = npc_srm / scc, srm = npc_srm / scc_srm ) %>%
+    group_by(gas) %>%
+    filter(nosrm<quantile(nosrm,0.99,na.rm=TRUE) &
+           scc<quantile(scc,0.99,na.rm=TRUE)) %>%
+    ggplot() +
+    geom_point(aes(x=scc,y=nosrm,color=gas),alpha=0.1) +
+    geom_point(data=. %>% filter(nosrm<=1),
+               aes(x=scc,y=nosrm,color=gas)) +
+    facet_wrap(gas~.,scales="free_x")
 
-damnorm %>% filter(gas=="co2" & scc<100) %>% 
-  mutate(nosrm = npc_srm / scc, srm = npc_srm / scc_srm ) %>% 
-  group_by(gas) %>% 
-  filter(nosrm<quantile(nosrm,0.99,na.rm=TRUE) & 
-         scc<quantile(scc,0.99,na.rm=TRUE)) %>% 
-  ggplot() +
-  geom_point(aes(x=scc,y=nosrm,color=gas),alpha=0.1) + 
-  geom_point(data=. %>% filter(nosrm<=1),
-             aes(x=scc,y=nosrm,color=gas)) +
-  facet_wrap(gas~.,scales="free_x")
-
-damnorm %>% 
-  mutate(nosrm = npc_srm / scc, srm = npc_srm / scc_srm ) %>% 
-  group_by(gas) %>% 
-  filter(nosrm<quantile(nosrm,0.95,na.rm=TRUE) & 
-         srm<quantile(srm,0.95,na.rm=TRUE) & 
-         scc<quantile(scc,0.95,na.rm=TRUE)) %>% 
-  select_at(c(all_cols,"srm","nosrm")) %>% 
-  pivot_longer(c(nosrm,srm),names_to="fracscc") %>% 
-  ggplot() +
-  geom_density(aes(x=value,
-                   color=gas,
-                   linetype=fracscc),
-               adjust=10,
-               linewidth=1) +
-  xlab("Normalized present cost") + ylab("density") 
+  damnorm %>%
+    mutate(nosrm = npc_srm / scc, srm = npc_srm / scc_srm ) %>%
+    group_by(gas) %>%
+    filter(nosrm<quantile(nosrm,0.95,na.rm=TRUE) &
+           srm<quantile(srm,0.95,na.rm=TRUE) &
+           scc<quantile(scc,0.95,na.rm=TRUE)) %>%
+    select_at(c(all_cols,"srm","nosrm")) %>%
+    pivot_longer(c(nosrm,srm),names_to="fracscc") %>%
+    ggplot() +
+    geom_density(aes(x=value,
+                     color=gas,
+                     linetype=fracscc),
+                 adjust=10,
+                 linewidth=1) +
+    xlab("Normalized present cost") + ylab("density")
+}

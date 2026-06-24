@@ -1,18 +1,27 @@
 library(tidyverse)
 library(data.table)
-output_folder <- "C:/Users/Andreoni/OneDrive - The University of Chicago/G-FAIR/Results_1903"
+
+# Single control file for plotting settings / result folders. Resolve relative to
+# this script if launched via Rscript, else assume the project working directory.
+.all_params <- "all_parameters.R"
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
+
+output_folder <- RESULTS_FOLDER_MAIN
 selected_traj <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "trajectories")), read.csv)) 
 setDT(selected_traj)
 
 
 plot_traj <- selected_traj[
-  t_rel < 200 & percentile %in% c(0.05, 0.25, 0.5, 0.75, 0.95) & variable=="Dtemp",
+  t_rel < FIG_TREL_WINDOW & percentile %in% FIG_PERCENTILES & variable=="Dtemp",
   .(gas, variable, t_rel, percentile, value)
 ]
 
 plot_line <- plot_traj[percentile == 0.5]
 plot_ribbon <- dcast(
-  plot_traj[percentile %in% c(0.05, 0.25, 0.75, 0.95)],
+  plot_traj[percentile %in% c(FIG_INNER_RIBBON, FIG_OUTER_RIBBON)],
   gas + variable + t_rel ~ percentile,
   value.var = "value"
 )
@@ -44,13 +53,13 @@ temp <- ggplot2::ggplot() +
 
 
 plot_traj_f <- selected_traj[
-  t_rel < 200 & percentile %in% c(0.05, 0.25, 0.5, 0.75, 0.95) & variable=="Dforc",
+  t_rel < FIG_TREL_WINDOW & percentile %in% FIG_PERCENTILES & variable=="Dforc",
   .(gas, variable, t_rel, percentile, value)
 ]
 
 plot_line_f <- plot_traj_f[percentile == 0.5]
 plot_ribbon_f <- dcast(
-  plot_traj_f[percentile %in% c(0.05, 0.25, 0.75, 0.95)],
+  plot_traj_f[percentile %in% c(FIG_INNER_RIBBON, FIG_OUTER_RIBBON)],
   gas + variable + t_rel ~ percentile,
   value.var = "value"
 )

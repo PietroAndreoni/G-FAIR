@@ -1,9 +1,22 @@
 # Shared constants and strict validators for the Monte Carlo pipeline.
 
-MC_SAMPLER_VERSION <- "mc_sampler_v2"
-MC_T_HORIZON <- 480L
-MC_HAZARD_LO <- 1e-3
-MC_HAZARD_HI <- 1e-1
+# Canonical numeric parameters now live in all_parameters.R (the single control
+# file). Source it once here and expose the historical MC_* names as aliases so
+# the validators below, Generate/Analyze, and the test harness keep working.
+if (!exists("T_HORIZON")) {
+  .ap <- "all_parameters.R"
+  .apsp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+  if (length(.apsp) == 1 && file.exists(file.path(dirname(.apsp), .ap)))
+    .ap <- file.path(dirname(.apsp), .ap)
+  if (!file.exists(.ap))
+    stop("montecarlo_utils.R: cannot locate all_parameters.R (the parameter control file).")
+  source(.ap)
+}
+
+MC_SAMPLER_VERSION <- SAMPLER_VERSION
+MC_T_HORIZON <- as.integer(T_HORIZON)
+MC_HAZARD_LO <- HAZARD_LO
+MC_HAZARD_HI <- HAZARD_HI
 
 MC_FAIR_COLS <- c("ecs", "tcr", "rcp", "pulse", "cool", "term", "start", "term_delta")
 MC_POST_COLS <- c("theta", "alpha", "delta", "prob", "mortality_srm", "forctoTg",
@@ -93,6 +106,63 @@ mc_assert_key_set_equal <- function(expected, observed, key_cols, context) {
     msg <- c(msg, paste0("unexpected extra keys: ", paste(utils::head(extra_s, 10), collapse = " | ")))
   }
   stop(context, " key-set mismatch: ", paste(msg, collapse = "; "), call. = FALSE)
+}
+
+mc_assert_complete_time_window <- function(x, key_cols, context,
+                                           t_col = "t",
+                                           start_col = "pulse_time",
+                                           end_t = MC_T_HORIZON,
+                                           max_rows = 10L) {
+  missing_cols <- setdiff(c(key_cols, t_col, start_col), names(x))
+  if (length(missing_cols) > 0) {
+    stop(context, " missing columns for time-window validation: ",
+         paste(missing_cols, collapse = ", "), call. = FALSE)
+  }
+  if (!requireNamespace("data.table", quietly = TRUE)) {
+    stop(context, " requires package data.table for time-window validation", call. = FALSE)
+  }
+
+  DT <- data.table::as.data.table(x)
+  summary <- DT[, {
+    t_raw <- suppressWarnings(as.numeric(get(t_col)))
+    start_raw <- suppressWarnings(as.numeric(get(start_col)))
+    bad_t <- any(is.na(t_raw) | !is.finite(t_raw) | t_raw != floor(t_raw))
+    bad_start <- any(is.na(start_raw) | !is.finite(start_raw) | start_raw != floor(start_raw))
+    t_vals <- sort(unique(as.integer(t_raw[!is.na(t_raw) & is.finite(t_raw) & t_raw == floor(t_raw)])))
+    start_vals <- unique(as.integer(start_raw[!is.na(start_raw) & is.finite(start_raw) & start_raw == floor(start_raw)]))
+    start_ok <- !bad_start && length(start_vals) == 1L && start_vals <= as.integer(end_t)
+    expected <- if (start_ok) seq.int(start_vals, as.integer(end_t)) else integer(0)
+    missing_t <- setdiff(expected, t_vals)
+    extra_t <- setdiff(t_vals, expected)
+    duplicate_count <- length(t_raw) - length(t_vals)
+    list(
+      start_values = if (length(start_vals) == 0L) NA_character_ else paste(start_vals, collapse = ","),
+      observed_years = length(t_vals),
+      expected_years = length(expected),
+      min_t = if (length(t_vals) == 0L) NA_integer_ else min(t_vals),
+      max_t = if (length(t_vals) == 0L) NA_integer_ else max(t_vals),
+      missing_count = length(missing_t),
+      extra_count = length(extra_t),
+      duplicate_count = duplicate_count,
+      invalid_t = bad_t,
+      invalid_start = bad_start || length(start_vals) != 1L || any(start_vals > as.integer(end_t)),
+      first_missing_t = if (length(missing_t) == 0L) NA_character_ else paste(utils::head(missing_t, 10), collapse = ","),
+      first_extra_t = if (length(extra_t) == 0L) NA_character_ else paste(utils::head(extra_t, 10), collapse = ",")
+    )
+  }, by = key_cols]
+
+  bad <- summary[
+    invalid_t | invalid_start | missing_count > 0L |
+      extra_count > 0L | duplicate_count > 0L
+  ]
+  if (nrow(bad) == 0L) return(invisible(TRUE))
+
+  details <- paste(utils::capture.output(print(utils::head(bad, max_rows))),
+                   collapse = "\n")
+  stop(context, " has incomplete time windows; expected every ",
+       paste(key_cols, collapse = "/"), " group to cover ",
+       start_col, ":", end_t, " exactly once.\nExamples:\n",
+       details, call. = FALSE)
 }
 
 validate_id_montecarlo <- function(x, context = "id_montecarlo.csv",

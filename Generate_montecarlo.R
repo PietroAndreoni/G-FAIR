@@ -36,14 +36,21 @@ if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
   .mc_utils <- file.path(dirname(.sp), .mc_utils)
 source(.mc_utils)
 
+# Single control file for every hard-coded input / distribution (also pulled in
+# transitively by montecarlo_utils.R; sourced explicitly here for clarity).
+.all_params <- "all_parameters.R"
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
+
 # logical
 overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
 main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
 diagnostics = ifelse(is.null(opts[["diagnostics"]]), F, as.logical(opts["diagnostics"]) )
 
 # numeric
-n_scenarios = ifelse(is.null(opts[["n"]]), 8096, as.numeric(opts["n"]) )
-seed = ifelse(is.null(opts[["seed"]]), 123, as.integer(opts["seed"]) )
+n_scenarios = ifelse(is.null(opts[["n"]]), N_SCENARIOS_DEFAULT, as.numeric(opts["n"]) )
+seed = ifelse(is.null(opts[["seed"]]), DEFAULT_SEED, as.integer(opts["seed"]) )
 if (length(n_scenarios) != 1 || is.na(n_scenarios) || n_scenarios < 1 || n_scenarios != floor(n_scenarios)) {
   stop("-n must be a positive integer")
 }
@@ -52,17 +59,18 @@ if (length(seed) != 1 || is.na(seed)) stop("--seed must be an integer")
 
 # strings
 res = ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o"]) )
-sampling_method = ifelse(is.null(opts[["method"]]), "sobol", as.character(opts["method"]) )
+sampling_method = ifelse(is.null(opts[["method"]]), SAMPLING_METHOD, as.character(opts["method"]) )
 if (!sampling_method %in% c("sobol","montecarlo")) stop("--method must be 'sobol' or 'montecarlo'")
 
 # theta for the deterministic main scenario (--base=T): a fixed angle, or "na"
 # to keep theta uncertain (sampled). Ignored when --base=F.
-angle_opt = ifelse(is.null(opts[["angle"]]), "10", as.character(opts["angle"]))
+angle_opt = ifelse(is.null(opts[["angle"]]), as.character(MAIN_THETA), as.character(opts["angle"]))
 keep_theta_uncertain <- str_to_lower(str_trim(angle_opt)) == "na"
 if (!keep_theta_uncertain) {
   base_theta <- suppressWarnings(as.numeric(angle_opt))
   if (length(base_theta) != 1 || is.na(base_theta)) stop("--angle must be a number or 'na'")
-  if (base_theta < 0 || base_theta > 90) stop("--angle must be between 0 and 90, or 'na'")
+  if (base_theta < THETA_TRUNC["lo"] || base_theta > THETA_TRUNC["hi"])
+    stop("--angle must be between ", THETA_TRUNC["lo"], " and ", THETA_TRUNC["hi"], ", or 'na'")
 } else {
   base_theta <- NA_real_
 }
@@ -91,14 +99,14 @@ end_draw_index <- start_draw_index + as.integer(n_scenarios) - 1L
 # Joint lognormal sampling for climate parameters
 # as in FAIR v1.3
 # Target: Corr(ECS, TCR) = 0.81 on the original (non-log) scale
-ecs_par <- fit_distribution(median=3, q5=2, q95=5, return_params=T)
-tcr_par <- fit_distribution(median=1.8, q5=1.2, q95=2.4, return_params=T)
-rho_ecs_tcr <- 0.81
+ecs_par <- fit_distribution(median=ECS_DIST$median, q5=ECS_DIST$q5, q95=ECS_DIST$q95, return_params=T)
+tcr_par <- fit_distribution(median=TCR_DIST$median, q5=TCR_DIST$q5, q95=TCR_DIST$q95, return_params=T)
+rho_ecs_tcr <- ECS_TCR_CORR
 rho_log <- log(1 + rho_ecs_tcr * sqrt((exp(ecs_par$sigma^2) - 1) * (exp(tcr_par$sigma^2) - 1))) /
   (ecs_par$sigma * tcr_par$sigma)
 
 if (!is.finite(rho_log) || abs(rho_log) > 1) {
-  stop("Inconsistent ECS/TCR marginals and requested correlation (0.81).")
+  stop("Inconsistent ECS/TCR marginals and requested correlation (", rho_ecs_tcr, ").")
 }
 
 cov_matrix <- matrix(c(1, rho_log, rho_log, 1), nrow=2, byrow=TRUE)
@@ -106,19 +114,19 @@ chol_cov <- chol(cov_matrix)
 n_draws <- n_scenarios
 
 # Discrete grids (equally-weighted) sampled jointly with the climate parameters.
-rcp_choices        <- c("RCP3PD","RCP45","RCP6","RCP85")
-pulse_choices      <- seq(5,80,by=1)
-cool_choices       <- seq(0,40,by=1)
-term_choices       <- seq(2200,2600,by=100)
-start_choices      <- seq(2025,2100,by=25)
+rcp_choices        <- RCP_CHOICES
+pulse_choices      <- PULSE_CHOICES
+cool_choices       <- COOL_CHOICES
+term_choices       <- TERM_CHOICES
+start_choices      <- START_CHOICES
 
 # Termination is modelled as a constant per-year hazard h = prob:
 #   P(termination at year t | not yet terminated) = h.
 # h is drawn log-uniform on [hazard_lo, hazard_hi]; this range is chosen so the
 # implied median termination delay, ln(0.5)/ln(1-h), is long enough to span the
-# analysed run (~700 yr at h=1e-3 down to ~7 yr at h=1e-1).
-hazard_lo <- MC_HAZARD_LO
-hazard_hi <- MC_HAZARD_HI
+# analysed run (~6930 yr at h=1e-4 down to ~7 yr at h=1e-1).
+hazard_lo <- HAZARD_LO
+hazard_hi <- HAZARD_HI
 
 # FAIR analysis horizon, in model-year units (t=1 is calendar 2020). FAIR solves
 # t=1..1000, but post-processing keeps only t<=480 (the projection window
@@ -126,8 +134,8 @@ hazard_hi <- MC_HAZARD_HI
 # time term_delta is the model-year SRM is switched off (t.val gt term_delta -> 0
 # in experiments/srm.gms); censoring it at t_horizon means a termination in the
 # last analysed year leaves no post-termination period, i.e. "no termination
-# within the run". Keep this in sync with the t<=480 cut in Analyze.
-t_horizon <- MC_T_HORIZON
+# within the run". Keep this in sync with the t<=T_HORIZON cut in Analyze.
+t_horizon <- T_HORIZON
 
 # Map uniform (0,1) draws onto an equally-weighted discrete grid (inverse CDF).
 map_discrete <- function(u, choices) {
@@ -143,7 +151,8 @@ map_discrete <- function(u, choices) {
 #  Post-processing parameters (applied to the gdx output, not part of any run):
 #   9: theta, 10: alpha, 11: delta, 12: prob (per-year termination hazard), 13: mortality_srm, 14: forctoTg,
 #   15: TgtoUSD, 16: mortality_ozone, 17: vsl, 18: vsl_eta, 19: dg
-n_dim <- 19
+# (the column->parameter mapping is SOBOL_COLUMN_MAP in all_parameters.R)
+n_dim <- N_SOBOL_DIM
 
 if (sampling_method == "sobol") {
   if (!mc_is_power_of_two(n_scenarios)) {
@@ -250,18 +259,21 @@ new_data <- data.frame(
   start = map_discrete(unit_draws[,7], start_choices),
   term_delta = term_delta_draw,   # absolute termination year (deployment + geometric delay, censored at horizon)
   term_delay = term_delay,
-  # --- post-processing parameters (moved from Analyze_montecarlo.R) ---
-  theta           = round(qlnorm_fit_trunc(unit_draws[,9], lo=0, hi=90, median=10, q5=3, q95=30), 0),
-  alpha           = round(qlnorm_fit(unit_draws[,10], median=0.00575, sd=0.00575*382/179), 4),
-  delta           = round(qunif(unit_draws[,11], 0.005, 0.075), 2),  # +/- half a 0.01 step so edges 0.01/0.07 get a full bin
+  # --- post-processing parameters (all distributions live in all_parameters.R) ---
+  theta           = round(qlnorm_fit_trunc(unit_draws[,9], lo=THETA_TRUNC[["lo"]], hi=THETA_TRUNC[["hi"]],
+                          median=THETA_DIST$median, q5=THETA_DIST$q5, q95=THETA_DIST$q95), THETA_ROUND),
+  alpha           = round(qlnorm_fit(unit_draws[,10], median=ALPHA_DIST$median, sd=ALPHA_DIST$sd), ALPHA_ROUND),
+  delta           = round(qunif(unit_draws[,11], DELTA_UNIF[["min"]], DELTA_UNIF[["max"]]), DELTA_ROUND),  # widened +/- half a step so grid edges get a full bin
   prob            = hazard,   # per-year termination hazard (log-uniform), drives term_delta
-  mortality_srm   = round(qlnorm_fit(unit_draws[,13], median=7400, q5=2300, q95=16000)),  # lognormal>0: no clamp needed
-  forctoTg        = round(1 / qunif(unit_draws[,14], 0.2, 1.5), 2),
-  TgtoUSD         = round(qunif(unit_draws[,15], 0.75, 3), 2),
-  mortality_ozone = round(qnorm_fit_trunc(unit_draws[,16], lo=0, median=11250, q5=5000, q95=17500) / 100),
-  vsl             = round(qunif(unit_draws[,17], 7.5, 13.6), 0) * 1e6,
-  vsl_eta         = round(qunif(unit_draws[,18], 0.35, 1.05), 1),  # +/- half a 0.1 step so edges 0.4/1.0 get a full bin
-  dg              = round(qnorm_fit(unit_draws[,19], median=0.015, sd=0.005), 3),
+  mortality_srm   = round(qlnorm_fit(unit_draws[,13], median=MORTALITY_SRM_DIST$median,
+                          q5=MORTALITY_SRM_DIST$q5, q95=MORTALITY_SRM_DIST$q95), MORTALITY_SRM_ROUND),  # lognormal>0: no clamp needed
+  forctoTg        = round(1 / qunif(unit_draws[,14], FORCTOTG_INV_UNIF[["min"]], FORCTOTG_INV_UNIF[["max"]]), FORCTOTG_ROUND),
+  TgtoUSD         = round(qunif(unit_draws[,15], TGTOUSD_UNIF[["min"]], TGTOUSD_UNIF[["max"]]), TGTOUSD_ROUND),
+  mortality_ozone = round(qnorm_fit_trunc(unit_draws[,16], lo=MORTALITY_OZONE_TRUNC[["lo"]], median=MORTALITY_OZONE_DIST$median,
+                          q5=MORTALITY_OZONE_DIST$q5, q95=MORTALITY_OZONE_DIST$q95) * MORTALITY_OZONE_SCALE, MORTALITY_OZONE_ROUND),
+  vsl             = round(qunif(unit_draws[,17], VSL_UNIF_MILLIONS[["min"]], VSL_UNIF_MILLIONS[["max"]]), VSL_ROUND) * VSL_SCALE,
+  vsl_eta         = round(qunif(unit_draws[,18], VSL_ETA_UNIF[["min"]], VSL_ETA_UNIF[["max"]]), VSL_ETA_ROUND),  # widened +/- half a step so grid edges get a full bin
+  dg              = round(qnorm_fit(unit_draws[,19], median=DG_DIST$median, sd=DG_DIST$sd), DG_ROUND),
   sampler_version = MC_SAMPLER_VERSION,
   sampling_method = sampling_method,
   seed            = seed,
@@ -270,17 +282,17 @@ new_data <- data.frame(
 )
 
 new_data <- new_data %>%
-    mutate(term=ifelse(cool==0,2700,term),
-           start=ifelse(cool==0,2700,start) )
-  
+    mutate(term=ifelse(cool==0,COOL0_TERM_SENTINEL,term),
+           start=ifelse(cool==0,COOL0_START_SENTINEL,start) )
+
 if (main_scenario==T) {
     new_data <- rbind(new_data %>%
-                    mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=5 ),
+                    mutate(rcp=MAIN_RCP, cool=MAIN_COOL, term=MAIN_TERM, start=MAIN_START, pulse=MAIN_PULSE_SET[1] ),
                   new_data %>%
-                    mutate(rcp="RCP45", cool=10, term=2400, start=2025, pulse=30 ) )
+                    mutate(rcp=MAIN_RCP, cool=MAIN_COOL, term=MAIN_TERM, start=MAIN_START, pulse=MAIN_PULSE_SET[2] ) )
     # Fix the post-processing parameters for the deterministic main scenario
     # (previously applied in Analyze_montecarlo.R).
-    new_data <- new_data %>% mutate(vsl = 10 * 1e6, delta = 0.02, vsl_eta = 1)
+    new_data <- new_data %>% mutate(vsl = MAIN_VSL, delta = MAIN_DELTA, vsl_eta = MAIN_VSL_ETA)
     if (!keep_theta_uncertain) new_data <- new_data %>% mutate(theta = base_theta) }
 
 new_data <- new_data %>%
@@ -368,48 +380,56 @@ if (diagnostics == T) {
   par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
   ex <- new_data$ecs / 10; tx <- new_data$tcr / 10
   smoothScatter(ex, tx, xlab = "ECS", ylab = "TCR",
-                main = sprintf("Joint ECS-TCR  (empirical corr = %.3f, target 0.81)", cor(ex, tx)))
+                main = sprintf("Joint ECS-TCR  (empirical corr = %.3f, target %.2f)", cor(ex, tx), ECS_TCR_CORR))
   abline(0, 1, col = "red", lty = 2)
   legend("bottomright", "ECS = TCR (constraint)", col = "red", lty = 2, bty = "n", cex = 0.8)
 
   # --- per-parameter marginals (3 params = 3 rows of [density | Q-Q] per page) ---
   par(mfrow = c(3, 2), mar = c(4.5, 4, 3, 1))
 
-  p <- ln(median = 3,   q5 = 2,    q95 = 5)
+  p <- do.call(ln, ECS_DIST)
   diag_panel(ex, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
-             "ecs (lognormal)", markers = c(2, 3, 5),
+             "ecs (lognormal)", markers = c(ECS_DIST$q5, ECS_DIST$median, ECS_DIST$q95),
              note = "drawn rounded to 0.1 & constrained ECS>TCR: lower-tail deviation expected")
-  p <- ln(median = 1.8, q5 = 1.2,  q95 = 2.4)
+  p <- do.call(ln, TCR_DIST)
   diag_panel(tx, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
-             "tcr (lognormal)", markers = c(1.2, 1.8, 2.4),
+             "tcr (lognormal)", markers = c(TCR_DIST$q5, TCR_DIST$median, TCR_DIST$q95),
              note = "drawn rounded to 0.1 & constrained ECS>TCR: upper-tail deviation expected")
-  p <- ln(median = 10,  q5 = 3,    q95 = 30)
+  p <- do.call(ln, THETA_DIST)
   diag_panel(new_data$theta,
-             dtrunc(function(x) dlnorm(x, p$mu, p$sigma), function(x) plnorm(x, p$mu, p$sigma), 0, 90),
-             qtrunc(function(x) plnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma), 0, 90),
-             "theta (lognormal truncated 0-90)", markers = c(3, 10, 30),
+             dtrunc(function(x) dlnorm(x, p$mu, p$sigma), function(x) plnorm(x, p$mu, p$sigma), THETA_TRUNC[["lo"]], THETA_TRUNC[["hi"]]),
+             qtrunc(function(x) plnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma), THETA_TRUNC[["lo"]], THETA_TRUNC[["hi"]]),
+             "theta (lognormal truncated 0-90)", markers = c(THETA_DIST$q5, THETA_DIST$median, THETA_DIST$q95),
              note = "truncated inverse-CDF on (0,90]; drawn rounded to 1")
-  p <- ln(median = 0.00575, sd = 0.00575 * 382 / 179)
+  p <- do.call(ln, ALPHA_DIST)
   diag_panel(new_data$alpha, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
              "alpha (lognormal, median+sd)")
-  p <- ln(median = 7400, q5 = 2300, q95 = 16000)
+  p <- do.call(ln, MORTALITY_SRM_DIST)
   diag_panel(new_data$mortality_srm, function(x) dlnorm(x, p$mu, p$sigma), function(q) qlnorm(q, p$mu, p$sigma),
-             "mortality_srm (lognormal)", markers = c(2300, 7400, 16000),
+             "mortality_srm (lognormal)",
+             markers = c(MORTALITY_SRM_DIST$q5, MORTALITY_SRM_DIST$median, MORTALITY_SRM_DIST$q95),
              note = "inputs inconsistent (q5*q95 != median^2): compromise fit")
-  p <- nm(median = 11250, q5 = 5000, q95 = 17500); mo <- p$mu / 100; so <- p$sigma / 100
+  p <- do.call(nm, MORTALITY_OZONE_DIST)
+  mo <- p$mu * MORTALITY_OZONE_SCALE; so <- p$sigma * MORTALITY_OZONE_SCALE
   diag_panel(new_data$mortality_ozone,
-             dtrunc(function(x) dnorm(x, mo, so), function(x) pnorm(x, mo, so), 0, Inf),
-             qtrunc(function(x) pnorm(x, mo, so), function(q) qnorm(q, mo, so), 0, Inf),
-             "mortality_ozone (normal /100, truncated >=0)", markers = c(50, 112.5, 175),
+             dtrunc(function(x) dnorm(x, mo, so), function(x) pnorm(x, mo, so), MORTALITY_OZONE_TRUNC[["lo"]], MORTALITY_OZONE_TRUNC[["hi"]]),
+             qtrunc(function(x) pnorm(x, mo, so), function(q) qnorm(q, mo, so), MORTALITY_OZONE_TRUNC[["lo"]], MORTALITY_OZONE_TRUNC[["hi"]]),
+             "mortality_ozone (normal /100, truncated >=0)",
+             markers = c(MORTALITY_OZONE_DIST$q5, MORTALITY_OZONE_DIST$median, MORTALITY_OZONE_DIST$q95) * MORTALITY_OZONE_SCALE,
              note = "truncated inverse-CDF at 0, scaled /100, rounded to 1")
-  p <- nm(median = 0.015, sd = 0.005)
+  p <- do.call(nm, DG_DIST)
   diag_panel(new_data$dg, function(x) dnorm(x, p$mu, p$sigma), function(q) qnorm(q, p$mu, p$sigma),
              "dg (normal, median+sd)")
 
   # fine-grid uniform parameters (rounding far below the spread -> continuous overlay)
-  diag_panel(new_data$TgtoUSD, function(x) dunif(x, 0.75, 3),    function(q) qunif(q, 0.75, 3),
+  diag_panel(new_data$TgtoUSD,
+             function(x) dunif(x, TGTOUSD_UNIF[["min"]], TGTOUSD_UNIF[["max"]]),
+             function(q) qunif(q, TGTOUSD_UNIF[["min"]], TGTOUSD_UNIF[["max"]]),
              "TgtoUSD ~ U(0.75,3)", note = "drawn rounded to 0.01 (effectively continuous)")
-  diag_panel(new_data$forctoTg, function(x) 1 / ((1.5 - 0.2) * x^2), function(q) 1 / (1.5 - q * (1.5 - 0.2)),
+  .ftg_lo <- FORCTOTG_INV_UNIF[["min"]]; .ftg_hi <- FORCTOTG_INV_UNIF[["max"]]
+  diag_panel(new_data$forctoTg,
+             function(x) 1 / ((.ftg_hi - .ftg_lo) * x^2),
+             function(q) 1 / (.ftg_hi - q * (.ftg_hi - .ftg_lo)),
              "forctoTg = 1/U(0.2,1.5)", note = "reciprocal-uniform; drawn rounded to 0.01")
 
   # prob = per-year termination hazard ~ LogUniform(hazard_lo,hazard_hi): a
@@ -417,7 +437,7 @@ if (diagnostics == T) {
   diag_panel(log10(new_data$prob),
              function(x) dunif(x, log10(hazard_lo), log10(hazard_hi)),
              function(q) qunif(q, log10(hazard_lo), log10(hazard_hi)),
-             "log10(prob): hazard ~ LogUniform(1e-3,1e-1)",
+             sprintf("log10(prob): hazard ~ LogUniform(%g,%g)", hazard_lo, hazard_hi),
              note = "per-year termination hazard; drives term_delta, drawn to 4 sig figs")
 
   # Termination delay (years of SRM before termination), the quantity the hazard
@@ -447,9 +467,9 @@ if (diagnostics == T) {
   # Sampling ranges widened by +/- half a grid step so every grid value (incl.
   # the edges) gets an equal-width bin; the expected-mass cdf uses the same
   # widened bounds so expected stays flat across all grid points.
-  diag_discrete(new_data$delta,    function(x) punif(x, 0.005, 0.075), 0.01, "delta ~ U(0.01,0.07) [grid 0.01, edges equalized]")
-  diag_discrete(new_data$vsl_eta,  function(x) punif(x, 0.35, 1.05),   0.1,  "vsl_eta ~ U(0.4,1) [grid 0.1, edges equalized]")
-  diag_discrete(new_data$vsl / 1e6, function(x) punif(x, 7.5, 13.6), 1,    "vsl/1e6 ~ round(U(7.5,13.6)) [grid 1]",
+  diag_discrete(new_data$delta,    function(x) punif(x, DELTA_UNIF[["min"]], DELTA_UNIF[["max"]]), DELTA_GRID_STEP, "delta ~ U(0.01,0.07) [grid 0.01, edges equalized]")
+  diag_discrete(new_data$vsl_eta,  function(x) punif(x, VSL_ETA_UNIF[["min"]], VSL_ETA_UNIF[["max"]]), VSL_ETA_GRID_STEP,  "vsl_eta ~ U(0.4,1) [grid 0.1, edges equalized]")
+  diag_discrete(new_data$vsl / VSL_SCALE, function(x) punif(x, VSL_UNIF_MILLIONS[["min"]], VSL_UNIF_MILLIONS[["max"]]), 1, "vsl/1e6 ~ round(U(7.5,13.6)) [grid 1]",
                 note = "banker's rounding at .5 may shift edge bins slightly")
 
   dev.off()

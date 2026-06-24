@@ -6,12 +6,19 @@ res <- lapply(pkgs,require_package)
 require_gdxtools()
 igdx(dirname(Sys.which('gams'))) # Please have gams in your PATH!
 
+# Single control file for plotting settings / input files / unit conversions.
+.all_params <- "all_parameters.R"
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
+
 # load data from Harmsen (provided in 2010 $/tonCeq)
-baseline <- read_parquet("input/data/harmsen_nonco2_baseline.lz4.parquet")
-macc <- read_parquet("input/data/harmsen_nonco2_macc.lz4.parquet")
+baseline <- read_parquet(HARMSEN_BASELINE_FIG3_SI)
+macc <- read_parquet(HARMSEN_MACC_FIG3_SI)
 
 output_folders <- tibble(
-  output_folder = list.files(pattern = "^Results_base_1903", full.names = TRUE)
+  output_folder = list.files(pattern = RESULTS_FOLDER_FIG3_PAT, full.names = TRUE)
 ) %>%
   filter(dir.exists(output_folder)) %>%
   arrange(output_folder) %>%
@@ -47,10 +54,10 @@ damnpv <- read_output_files(output_folders, "npc_output")
 scc <- read_output_files(output_folders, "sccnosrm_output") %>% rename(scc = scc_nosrm)
 scc_srm <- read_output_files(output_folders, "scc_output") %>% rename(scc_srm = scc)
 all_cols <- c(names(damnpv)[1:20], "angle")
-remove_outliers <- c("ecs","tcr","alpha","theta","mortality_srm","mortality_ozone","dg","TgtoUSD","forctoTg")
+remove_outliers <- FIG_OUTLIER_COLS
 check_densities <- damnpv %>%
   filter(gas=="ch4") %>%
-  filter_at(remove_outliers, ~ (.x <= quantile(.x, 0.999, na.rm = TRUE) & .x >= quantile(.x, 0.001, na.rm = TRUE) ) ) %>%
+  filter_at(remove_outliers, ~ (.x <= quantile(.x, FIG_OUTLIER_QHI, na.rm = TRUE) & .x >= quantile(.x, FIG_OUTLIER_QLO, na.rm = TRUE) ) ) %>%
   select_at(setdiff(all_cols,c("gas") ))
 check_densities %>%
   select_at(remove_outliers) %>%
@@ -74,7 +81,7 @@ damnpv %>%
             .groups = "drop")
 
 # enerdata co2 (provided in 2015 $/tonCO2)
-macc_co2 <- read_parquet("input/data/macc_ed_full_2022.lz4.parquet") %>%
+macc_co2 <- read_parquet(MACC_CO2_FILE) %>%
   filter(Variable=="Emissions") %>%
   group_by(Year,Scenario,Carbon_value) %>%
   summarise(value=sum(Value)) %>%
@@ -83,65 +90,23 @@ macc_co2 <- read_parquet("input/data/macc_ed_full_2022.lz4.parquet") %>%
   rename(cost=Carbon_value,year=Year) %>%
   select(Scenario,year,cost,miu)
 
-
-map_sectors_to_ipcc <- c("fossil"="coal",
-                         "fossil"="oil",
-                         "fossil"="gas",
-                         "agriculture"="animals / enteric fermentation",
-                         "agriculture"="fertilizer use",
-                         "agriculture"="wetland rice production",
-                         "agriculture"="animal waste",
-                         "waste"="landfills",
-                         "waste"="domestic sewage",
-                         "industry"="adipic acid production",
-                         "industry"="nitric acid production",
-                         "industry"="pfc",
-                         "industry"="hfc",
-                         "transport"="transport")
-
-ar4gwp <- c("c2f6"=12200,
-            "c6f14"=9300,
-            "cf4"=7390,
-            "hfc125"=124,
-            "hfc134a"=1430,
-            "hfc143a"=4470,
-            "hfc152a"=124,
-            "hfc227ea"=3220,
-            "hfc23"=14800,
-            "hfc236fa"=675,
-            "hfc245ca"=693,
-            "hfc32"=675,
-            "hfc4310"=1640,
-            "ch4"=25,
-            "n2o"=298)
-
-correction_factor <- macc %>%
-  filter(cost==0) %>%
-  select(-cost) %>% rename(miu0=value) %>%
-  full_join(baseline %>% rename(base=value)) %>%
-  filter(year>=2015 & e %in% c("CH4","N2O") ) %>%
-  group_by(e,sector,year) %>%
-  mutate(wbase = sum(base,na.rm=TRUE)) %>%
-  group_by(image26,region,e,sector) %>%
-  mutate(share = base/wbase[year==2015] / (1-miu0) )
-
-macc_by_gas_w <- macc %>%
-  inner_join(correction_factor) %>%
-  group_by(image26,e,sector,cost) %>%
-  mutate(value=(1-value)*share*wbase[year==2015] ) %>%
+# AR4 GWP-100 values now come from all_parameters.R (AR4_GWP100); see Figure_3.
+macc_by_gas_w <- macc %>% 
+  filter(unit=="emissions") %>% 
+  full_join(baseline %>% rename(base=value) ) %>%
   group_by(year,e,cost) %>%
   summarize(value=sum(value,na.rm=TRUE),
             base=sum(base,na.rm=TRUE)) %>%
   ungroup() %>% mutate(miu=(base-value)/base, e=tolower(e)) %>%
-  mutate(cost=cost*ar4gwp[e]*12/44) %>%
+  mutate(cost=cost*AR4_GWP100[e]*C_PER_CO2*FIG3_CH4_EXTRA_FACTOR) %>%
   select(year,e,cost,miu)
 
 data <- damnpv %>%
   filter(gas=="ch4") %>%
   mutate(year=pulse_time+2020) %>%
-  filter(year %in% c(2025,2050) )
+  filter(year %in% FIG3_MACC_YEARS )
 
-density_cost_unit <- 100
+density_cost_unit <- DENSITY_COST_UNIT
 
 fig3_si <- ggplot() +
   # geom_line(data=macc_by_gas_w %>%
@@ -172,9 +137,9 @@ fig3_si <- ggplot() +
   theme_classic() +
   ylab("Emission reductions (% of baseline)\nDensity (%)") +
   theme(legend.position = "top") +
-  coord_cartesian(xlim=c(0,10000)) +
+  coord_cartesian(xlim=FIG3_XLIM) +
   scale_linetype_discrete(name = "Angle") +
-  scale_x_continuous(labels = ~paste(., ./25, sep = "\n"),
+  scale_x_continuous(labels = ~paste(., ./CH4_GWP100, sep = "\n"),
                      name = expression(atop("Abatement cost ($/ton" * CH[4] * ")",
                                             "Abatement cost ($/ton" * CO[2] * "eq)"))) #+ facet_wrap(year~.,)
 

@@ -6,19 +6,26 @@ res <- lapply(pkgs,require_package)
 require_gdxtools()
 igdx(dirname(Sys.which('gams'))) # Please have gams in your PATH!
 
-# load data from Harmsen (provided in 2010 $/tonCeq)
-baseline <- read_parquet("input/data/harmsen_nonco2_baseline.parquet")
-macc <- read_parquet("input/data/harmsen_nonco2_macc.parquet")
+# Single control file for plotting settings / input files / unit conversions.
+.all_params <- "all_parameters.R"
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
 
-output_folder <- "Results_base_1903_angle30"
+# load data from Harmsen (provided in 2010 $/tonCeq)
+baseline <- read_parquet(HARMSEN_BASELINE_FIG3)
+macc <- read_parquet(HARMSEN_MACC_FIG3)
+
+output_folder <- RESULTS_FOLDER_FIG3
 damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv)) 
 scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output")), read.csv)) %>% rename(scc=scc_nosrm)
 scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output")), read.csv)) %>% rename(scc_srm=scc)
 all_cols <- names(damnpv)[1:20]
-remove_outliers <- c("ecs","tcr","alpha","theta","mortality_srm","mortality_ozone","dg","TgtoUSD","forctoTg")
-check_densities <- damnpv %>% 
-  filter(gas=="ch4") %>% 
-  filter_at(remove_outliers, ~ (.x <= quantile(.x, 0.999, na.rm = TRUE) & .x >= quantile(.x, 0.001, na.rm = TRUE) ) ) %>% 
+remove_outliers <- FIG_OUTLIER_COLS
+check_densities <- damnpv %>%
+  filter(gas=="ch4") %>%
+  filter_at(remove_outliers, ~ (.x <= quantile(.x, FIG_OUTLIER_QHI, na.rm = TRUE) & .x >= quantile(.x, FIG_OUTLIER_QLO, na.rm = TRUE) ) ) %>%
   select_at(setdiff(all_cols,c("gas") ))
 check_densities %>% 
   select_at(remove_outliers) %>% 
@@ -41,7 +48,7 @@ damnpv %>%
             p95=quantile(npc_srm,.95))
 
 # enerdata co2 (provided in 2015 $/tonCO2)
-macc_co2 <- read_parquet("input/data/macc_ed_full_2022.lz4.parquet") %>% 
+macc_co2 <- read_parquet(MACC_CO2_FILE) %>%
   filter(Variable=="Emissions") %>% 
   group_by(Year,Scenario,Carbon_value) %>%
   summarise(value=sum(Value)) %>% 
@@ -57,20 +64,20 @@ macc_by_gas_w <- macc %>%
   summarize(value=sum(value,na.rm=TRUE),
             base=sum(base,na.rm=TRUE)) %>%
   ungroup() %>% mutate(miu=(base-value)/base, e=tolower(e)) %>%
-  mutate(cost=cost*ar4gwp[e]*12/44*1.43) %>%
+  mutate(cost=cost*AR4_GWP100[e]*C_PER_CO2*USD_DEFLATOR_2010_2020) %>%
   select(year,e,cost,miu)
 
-data <- damnpv %>% 
+data <- damnpv %>%
   filter(gas=="ch4") %>%
-  mutate(year=pulse_time+2020) %>% 
-  filter(year %in% c(2025,2050) )
+  mutate(year=pulse_time+2020) %>%
+  filter(year %in% FIG3_MACC_YEARS )
 
-density_cost_unit <- 100
+density_cost_unit <- DENSITY_COST_UNIT
 
 fig3 <- ggplot() +
-  geom_line(data=macc_by_gas_w %>% 
-              filter(e=="ch4" & year %in% c(2025,2050) ),
-            aes(y=miu*100,x=cost), 
+  geom_line(data=macc_by_gas_w %>%
+              filter(e=="ch4" & year %in% FIG3_MACC_YEARS ),
+            aes(y=miu*100,x=cost),
             color="black",linewidth=1,linetype=2)+
   geom_density(data=data,aes(x=(masknpv+damnpv+dirnpv+srmpnpv)/pulse_size,
                              y=after_stat(density * 100 * density_cost_unit) ),
@@ -91,8 +98,8 @@ fig3 <- ggplot() +
   theme_classic() + 
   ylab("Emission reductions (% of baseline)\nDensity (% per $100/ton)") + 
   theme(legend.position = "none") + 
-  coord_cartesian(xlim=c(0,10000),ylim=c(0,50)) +
-  scale_x_continuous(labels = ~paste(., ./25, ./25*44/12,sep = "\n"),
+  coord_cartesian(xlim=FIG3_XLIM,ylim=FIG3_YLIM) +
+  scale_x_continuous(labels = ~paste(., ./CH4_GWP100, ./CH4_GWP100/C_PER_CO2,sep = "\n"),
                      name = expression(atop("Abatement cost ($/ton" * CH[4] * ")",
                                             "Abatement cost ($/ton" * CO[2] * "eq)",
                                             "Abatement cost ($/tonCeq)"))) #+ facet_wrap(year~.,)

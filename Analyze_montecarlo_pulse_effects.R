@@ -24,6 +24,13 @@ pkgs <- c("data.table", "stringr", "docopt", "ggplot2")
 invisible(lapply(pkgs, require_package))
 require_gdxtools()
 
+# Single control file for every hard-coded input / constant.
+.all_params <- "all_parameters.R"
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
+  .all_params <- file.path(dirname(.sp), .all_params)
+source(.all_params)
+
 # ------------------------------------------------------------------
 # Script summary (synthetic):
 # 1) Load matching pulse/base and srmpulse/srm simulations.
@@ -59,7 +66,7 @@ sanitize_dt <- function(DT) {
   setDT(DT)
   if ("t" %in% names(DT)) DT[, t := as.numeric(t)]
   if ("gdx" %in% names(DT)) DT <- DT[, !"gdx", with = FALSE]
-  DT <- DT[t <= 480]
+  DT <- DT[t <= T_HORIZON]
   unique(DT)
 }
 
@@ -73,17 +80,17 @@ quantile_summary <- function(DT, value_col, group_cols) {
   out <- DT[, .(
     n = .N,
     median = median(get(value_col), na.rm = TRUE),
-    p05 = as.numeric(quantile(get(value_col), 0.05, na.rm = TRUE, type = 8)),
-    p25 = as.numeric(quantile(get(value_col), 0.25, na.rm = TRUE, type = 8)),
-    p75 = as.numeric(quantile(get(value_col), 0.75, na.rm = TRUE, type = 8)),
-    p95 = as.numeric(quantile(get(value_col), 0.95, na.rm = TRUE, type = 8))
+    p05 = as.numeric(quantile(get(value_col), 0.05, na.rm = TRUE, type = QUANTILE_TYPE)),
+    p25 = as.numeric(quantile(get(value_col), 0.25, na.rm = TRUE, type = QUANTILE_TYPE)),
+    p75 = as.numeric(quantile(get(value_col), 0.75, na.rm = TRUE, type = QUANTILE_TYPE)),
+    p95 = as.numeric(quantile(get(value_col), 0.95, na.rm = TRUE, type = QUANTILE_TYPE))
   ), by = group_cols]
   out[, variable := value_col]
   setcolorder(out, c(group_cols, "variable", "n", "median", "p05", "p25", "p75", "p95"))
   out
 }
 
-select_percentile_runs <- function(DT, group_cols, run_cols, probs, value_col = "Dtemp", rmse_window = 200) {
+select_percentile_runs <- function(DT, group_cols, run_cols, probs, value_col = "Dtemp", rmse_window = RMSE_WINDOW) {
   # Select percentile runs using value_col, enforcing monotonic ordering:
   # higher percentile trajectories must be >= lower percentile trajectories
   # at every t_rel used for RMSE.
@@ -107,7 +114,7 @@ select_percentile_runs <- function(DT, group_cols, run_cols, probs, value_col = 
     chosen <- data.table()
 
     for (p in probs) {
-      qcurve <- wg[, .(q_value = as.numeric(quantile(get(value_col), p, na.rm = TRUE, type = 8))), by = "t_rel"]
+      qcurve <- wg[, .(q_value = as.numeric(quantile(get(value_col), p, na.rm = TRUE, type = QUANTILE_TYPE))), by = "t_rel"]
       dev <- merge(wg, qcurve, by = "t_rel", all = FALSE)
       dev[, sqe := (get(value_col) - q_value)^2]
       rmse_tbl <- dev[, .(rmse = sqrt(mean(sqe, na.rm = TRUE))), by = run_cols]
@@ -256,10 +263,10 @@ Options:
 -o <results>           Results folder(s) with .gdx outputs. Separate multiple folders with -
 --res <output_folder>  Output folder [default: Montecarlo]
 --hpc <run_hpc>        T/F if running on HPC 
---traj_q <traj_q>      Comma-separated percentile(s) for coherent-run selection 
---chunk <chunk>        Number of matched scenario-groups processed per batch [default: 400]
+--traj_q <traj_q>      Comma-separated percentile(s) for coherent-run selection (default: TRAJ_PROBS in all_parameters.R)
+--chunk <chunk>        Number of matched scenario-groups processed per batch (default: PULSE_CHUNK_N in all_parameters.R)
 --plot <plot_results>  T/F to generate plots [default: T]
---rmse_window <rmse_window>  Time window (years from pulse) used for RMSE and monotonic checks [default: 200]
+--rmse_window <rmse_window>  Time window (years from pulse) for RMSE/monotonic checks (default: RMSE_WINDOW in all_parameters.R)
 ' -> doc
 
 opts <- docopt(doc, version = "Analyze_montecarlo_pulse_effects")
@@ -268,11 +275,11 @@ res <- ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts[["o"
 res <- str_split(res, "-")[[1]]
 output_folder <- ifelse(is.null(opts[["res"]]), "Montecarlo", as.character(opts[["res"]]))
 run_hpc <- ifelse(is.null(opts[["hpc"]]), F, as.logical(opts[["hpc"]]))
-traj_q <- ifelse(is.null(opts[["traj_q"]]), "0.05,0.25,0.5,0.75,0.95", as.character(opts[["traj_q"]]))
+traj_q <- ifelse(is.null(opts[["traj_q"]]), paste(TRAJ_PROBS, collapse = ","), as.character(opts[["traj_q"]]))
 traj_probs <- as.numeric(trimws(str_split(traj_q, ",")[[1]]))
-chunk_n <- ifelse(is.null(opts[["chunk"]]), 400L, as.integer(opts[["chunk"]]))
+chunk_n <- ifelse(is.null(opts[["chunk"]]), PULSE_CHUNK_N, as.integer(opts[["chunk"]]))
 plot_results <- ifelse(is.null(opts[["plot"]]), T, as.logical(opts[["plot"]]))
-rmse_window <- ifelse(is.null(opts[["rmse_window"]]), 200, as.numeric(opts[["rmse_window"]]))
+rmse_window <- ifelse(is.null(opts[["rmse_window"]]), RMSE_WINDOW, as.numeric(opts[["rmse_window"]]))
 if (any(is.na(traj_probs)) || any(traj_probs <= 0 | traj_probs >= 1)) {
   stop("--traj_q must contain numbers strictly between 0 and 1, e.g. 0.75 or 0.25,0.5,0.75")
 }
@@ -286,7 +293,7 @@ if (any(!dir.exists(res))) stop("Some result folders do not exist")
 if (run_hpc == FALSE) {
   igdx()
 } else {
-  igdx("/work/cmcc/pa12520/gams40.4_linux_x64_64_sfx")
+  igdx(HPC_GAMS_PATH)
   logfile <- file(file.path(output_folder, "r_console_pulse_effects.log"), open = "wt")
   sink(logfile)
   sink(logfile, type = "message")

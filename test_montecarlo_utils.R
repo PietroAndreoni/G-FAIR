@@ -73,4 +73,27 @@ bad_term <- valid
 bad_term$term_delta[1] <- bad_term$pulse[1]
 expect_error(validate_id_montecarlo(bad_term, "bad term fixture"), "term_delta must be strictly greater")
 
+complete_window <- data.frame(
+  ID = c(1, 1, 1, 2, 2),
+  gas = c("co2", "co2", "co2", "ch4", "ch4"),
+  pulse_time = c(1, 1, 1, 2, 2),
+  t = c(1, 2, 3, 2, 3)
+)
+mc_assert_complete_time_window(complete_window, c("ID", "gas"),
+                               "complete time-window fixture", end_t = 3)
+
+missing_window <- complete_window[!(complete_window$ID == 1 & complete_window$t == 2), ]
+expect_error(
+  mc_assert_complete_time_window(missing_window, c("ID", "gas"),
+                                 "missing time-window fixture", end_t = 3),
+  "incomplete time windows"
+)
+
+duplicate_window <- rbind(complete_window, complete_window[1, ])
+expect_error(
+  mc_assert_complete_time_window(duplicate_window, c("ID", "gas"),
+                                 "duplicate time-window fixture", end_t = 3),
+  "incomplete time windows"
+)
+
 cat("Monte Carlo utility tests passed.\n")
