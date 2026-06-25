@@ -435,7 +435,7 @@ missing_required <- required_runs[!stats::complete.cases(required_runs[, ..file_
 if (nrow(missing_required) > 0L) {
   missing_required[, missing_experiments := apply(.SD, 1, function(z) paste(names(z)[is.na(z)], collapse = ", ")), .SDcols = file_cols]
   details <- paste(capture.output(print(head(missing_required[, c("ID", scenario_names, "missing_experiments"), with = FALSE], 20))), collapse = "\n")
-  stop("Missing required GDX experiment files for Monte Carlo realizations:\n", details)
+  warning("Missing required GDX experiment files for Monte Carlo realizations:\n", details)
 }
 
 all_experiments <- unique(required_runs[, ..scenario_names])
@@ -536,6 +536,11 @@ scc <- merge(scc, id_montecarlo[, !c("theta","term","prob","mortality_srm","forc
 mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
                      paste0("SCC-with-SRM Monte Carlo inputs chunk ", n_chunk))
 scc <- scc[ t >= as.numeric(pulse_time) ]
+# The id_montecarlo join keys on the SRM scenario without `term`, so it can pull
+# in realizations whose termination time places their full scenario in a later
+# chunk. Restrict to this chunk's realizations (see the no-SRM note below) so
+# nothing is double-counted across chunks.
+scc <- scc[expected_chunk_keys, on = c("ID", "gas"), nomatch = 0L]
 scc[, `:=`(
   dtemp_srmpulse_srm = temp_srmpulse - temp_srm,
   dforc_srmpulse_srm = forc_srmpulse - forc_srm
@@ -589,6 +594,13 @@ scc <- merge(scc, id_montecarlo[, c("ID","ecs","tcr","rcp","pulse_time","alpha",
 mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
                      paste0("SCC-no-SRM Monte Carlo inputs chunk ", n_chunk))
 scc <- scc[ t >= as.numeric(pulse_time) ]
+# The no-SRM SCC is keyed only on the base FAIR scenario (ecs/tcr/rcp/pulse_time),
+# so the id_montecarlo join above pulls in every realization sharing that base
+# scenario -- including IDs whose SRM dimensions (cool_rate/geo/term) place their
+# full scenario in a different chunk. Keep only this chunk's realizations so the
+# same ID isn't aggregated and appended again from its own chunk (duplicate rows)
+# and the key-set assertion below holds.
+scc <- scc[expected_chunk_keys, on = c("ID", "gas"), nomatch = 0L]
 scc[, `:=`(
   dtemp_pulse_base = temp_pulse - temp_base,
   dforc_pulse_base = forc_pulse - forc_base

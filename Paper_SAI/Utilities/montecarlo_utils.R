@@ -109,12 +109,16 @@ mc_assert_key_set_equal <- function(expected, observed, key_cols, context) {
   missing_s <- setdiff(expected_s, observed_s)
   extra_s <- setdiff(observed_s, expected_s)
   if (length(missing_s) == 0 && length(extra_s) == 0) return(invisible(TRUE))
+  # Keys are built by paste()-ing the key columns with a "\r" separator (chosen so
+  # it can't collide with real values); turn that into a visible "/" for the
+  # message, otherwise the carriage returns overwrite the text in the console.
+  fmt_keys <- function(s) gsub("\r", "/", utils::head(s, 10), fixed = TRUE)
   msg <- character(0)
   if (length(missing_s) > 0) {
-    msg <- c(msg, paste0("missing expected keys: ", paste(utils::head(missing_s, 10), collapse = " | ")))
+    msg <- c(msg, paste0("missing expected keys: ", paste(fmt_keys(missing_s), collapse = " | ")))
   }
   if (length(extra_s) > 0) {
-    msg <- c(msg, paste0("unexpected extra keys: ", paste(utils::head(extra_s, 10), collapse = " | ")))
+    msg <- c(msg, paste0("unexpected extra keys: ", paste(fmt_keys(extra_s), collapse = " | ")))
   }
   stop(context, " key-set mismatch: ", paste(msg, collapse = "; "), call. = FALSE)
 }
