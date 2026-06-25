@@ -431,11 +431,23 @@ required_runs[, f_pulse              := dt_pulse[required_runs, on = k_pulse, mu
 required_runs[, f_base               := dt_base[required_runs, on = k_base, mult = "first"]$gdx]
 
 file_cols <- grep("^f_", names(required_runs), value = TRUE)
-missing_required <- required_runs[!stats::complete.cases(required_runs[, ..file_cols])]
+complete_mask <- stats::complete.cases(required_runs[, ..file_cols])
+missing_required <- required_runs[!complete_mask]
 if (nrow(missing_required) > 0L) {
   missing_required[, missing_experiments := apply(.SD, 1, function(z) paste(names(z)[is.na(z)], collapse = ", ")), .SDcols = file_cols]
   details <- paste(capture.output(print(head(missing_required[, c("ID", scenario_names, "missing_experiments"), with = FALSE], 20))), collapse = "\n")
-  warning("Missing required GDX experiment files for Monte Carlo realizations:\n", details)
+  # These realizations never produced a complete set of GDX experiment files, so
+  # they cannot be analyzed. Warn instead of aborting, but DROP them: if they stay
+  # in required_runs they remain in all_experiments / expected_chunk_keys and every
+  # downstream key-set assertion fails with "missing expected keys" for IDs that
+  # can never appear in the output. (Switch warning -> stop to make it fatal again.)
+  warning(nrow(missing_required), " Monte Carlo realization(s) are missing required GDX ",
+          "experiment files and will be SKIPPED:\n", details)
+  required_runs <- required_runs[complete_mask]
+}
+
+if (nrow(required_runs) == 0L) {
+  stop("No Monte Carlo realizations have a complete set of GDX experiment files; nothing to analyze.")
 }
 
 all_experiments <- unique(required_runs[, ..scenario_names])
