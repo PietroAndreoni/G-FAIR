@@ -1,16 +1,25 @@
 # Shared constants and strict validators for the Monte Carlo pipeline.
 
 # Canonical numeric parameters now live in all_parameters.R (the single control
-# file). Source it once here and expose the historical MC_* names as aliases so
-# the validators below, Generate/Analyze, and the test harness keep working.
+# file). Source it once here (unless a caller already did) and expose the
+# historical MC_* names as aliases. Located robustly so this works under Rscript,
+# RStudio "Source", or an interactive console at/under/above the project.
 if (!exists("T_HORIZON")) {
-  .apsp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-  .apr <- if (length(.apsp) == 1) dirname(.apsp) else getwd()
-  while (!file.exists(file.path(.apr, "all_parameters.R")) && dirname(.apr) != .apr)
-    .apr <- dirname(.apr)
-  if (!file.exists(file.path(.apr, "all_parameters.R")))
-    stop("montecarlo_utils.R: cannot locate all_parameters.R (the parameter control file).")
-  source(file.path(.apr, "all_parameters.R"))
+  .mc_find_root <- function() {
+    starts <- c(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)),
+                unlist(lapply(sys.frames(), function(f) f$ofile)), getwd())
+    for (s in starts[nzchar(starts)]) {
+      d <- if (dir.exists(s)) s else dirname(s)
+      repeat {
+        if (file.exists(file.path(d, "all_parameters.R"))) return(d)
+        if (file.exists(file.path(d, "Paper_SAI", "all_parameters.R"))) return(file.path(d, "Paper_SAI"))
+        if (identical(dirname(d), d)) break
+        d <- dirname(d)
+      }
+    }
+    stop("montecarlo_utils.R: cannot locate all_parameters.R (the control file).", call. = FALSE)
+  }
+  source(file.path(.mc_find_root(), "all_parameters.R"))
 }
 
 MC_SAMPLER_VERSION <- SAMPLER_VERSION

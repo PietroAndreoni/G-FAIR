@@ -2,13 +2,27 @@ library(tidyverse)
 
 # Single control file for plotting settings / result folders. Resolve relative to
 # this script if launched via Rscript, else assume the project working directory.
-.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
-while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
-  .root <- dirname(.root)
-if (!file.exists(file.path(.root, "all_parameters.R")))
-  stop("Cannot locate all_parameters.R (Paper_SAI root).")
-source(file.path(.root, "all_parameters.R"))
+# Locate the Paper_SAI folder (holds all_parameters.R) robustly so the script
+# works under Rscript (--file), RStudio "Source" (sys.frame $ofile), and an
+# interactive console whose working dir is at/under/above the project.
+.find_paper_root <- function() {
+  starts <- c(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)),
+              unlist(lapply(sys.frames(), function(f) f$ofile)), getwd())
+  for (s in starts[nzchar(starts)]) {
+    d <- if (dir.exists(s)) s else dirname(s)
+    repeat {
+      if (file.exists(file.path(d, "all_parameters.R")))
+        return(normalizePath(d, "/", FALSE))
+      if (file.exists(file.path(d, "Paper_SAI", "all_parameters.R")))
+        return(normalizePath(file.path(d, "Paper_SAI"), "/", FALSE))
+      if (identical(dirname(d), d)) break
+      d <- dirname(d)
+    }
+  }
+  stop("Cannot locate all_parameters.R (Paper_SAI control file); set the working ",
+       "directory to the project root or the Paper_SAI folder.", call. = FALSE)
+}
+source(file.path(.find_paper_root(), "all_parameters.R"))
 
 output_folder <- RESULTS_FOLDER_MAIN
 damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv))
@@ -30,10 +44,10 @@ check_densities %>%
   
 # filter scc and npc>0 and scenarios with both CH4 and CO2
 damnpv <- damnpv %>% 
-  inner_join(check_densities) %>% 
+#  inner_join(check_densities) %>% 
 #  inner_join(scc %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
 #  inner_join(scc_srm %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
-  filter(npc_srm>0 ) %>% 
+#  filter(npc_srm>0 ) %>% 
   group_by_at(setdiff(all_cols,c("gas")) ) %>% 
   filter(n()==2 & !any(duplicated(gas))) %>% 
   ungroup() %>% unique()
@@ -108,7 +122,7 @@ geom_point(aes(x=log10(npc_norm),
   ggpubr::theme_pubr(legend="none")
 
 library(gsaot)
-gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="ch4" & npc_srm<=quantile(npc_srm,0.95)) %>% #filter(npc_srm>quantile(npc_srm,0.01)  & npc_srm<quantile(npc_srm,0.99)) %>% 
+gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="ch4") %>% #filter(npc_srm>quantile(npc_srm,0.01)  & npc_srm<quantile(npc_srm,0.99)) %>% 
   select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-npc_std)
 
 stat_analysis_ch4 <- ot_indices_1d(gsoat_data %>% select(-npc_srm, -npc_norm),
@@ -218,13 +232,14 @@ stat_analysis_diff <- ot_indices_1d(gsoat_data %>%
                                     R = GSA_R)
 lowerbound_diff <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, solver="1d")
 
-data <- data.frame(i=seq(1,1000),irr=NA,sample=NA)
-for(i in seq(1,1000)) {
-data[i,"sample"] <- pmin(nrow(gsoat_data),sample(seq(1000,10000,by=100),1))
-data[i,"irr"] <- irrelevance_threshold(sample(gsoat_data %>% pull(diff),data[i,"sample"]), M= GSA_M, solver="1d")$indices
-data[i,"irr_tot"] <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, solver="1d")$indices
-
- }
+# CHECK 
+# data <- data.frame(i=seq(1,1000),irr=NA,sample=NA)
+# for(i in seq(1,1000)) {
+# data[i,"sample"] <- pmin(nrow(gsoat_data),sample(seq(1000,10000,by=100),1))
+# data[i,"irr"] <- irrelevance_threshold(sample(gsoat_data %>% pull(diff),data[i,"sample"]), M= GSA_M, solver="1d")$indices
+# data[i,"irr_tot"] <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, solver="1d")$indices
+# 
+#  }
 
 hist(gsoat_data %>% pull(diff))
 ggplot(data) +

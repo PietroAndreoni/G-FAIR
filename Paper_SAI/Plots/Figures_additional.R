@@ -4,13 +4,27 @@ require(patchwork)
 
 # Single control file for plotting settings / result folders. Resolve relative to
 # this script if launched via Rscript, else assume the project working directory.
-.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
-while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
-  .root <- dirname(.root)
-if (!file.exists(file.path(.root, "all_parameters.R")))
-  stop("Cannot locate all_parameters.R (Paper_SAI root).")
-source(file.path(.root, "all_parameters.R"))
+# Locate the Paper_SAI folder (holds all_parameters.R) robustly so the script
+# works under Rscript (--file), RStudio "Source" (sys.frame $ofile), and an
+# interactive console whose working dir is at/under/above the project.
+.find_paper_root <- function() {
+  starts <- c(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)),
+              unlist(lapply(sys.frames(), function(f) f$ofile)), getwd())
+  for (s in starts[nzchar(starts)]) {
+    d <- if (dir.exists(s)) s else dirname(s)
+    repeat {
+      if (file.exists(file.path(d, "all_parameters.R")))
+        return(normalizePath(d, "/", FALSE))
+      if (file.exists(file.path(d, "Paper_SAI", "all_parameters.R")))
+        return(normalizePath(file.path(d, "Paper_SAI"), "/", FALSE))
+      if (identical(dirname(d), d)) break
+      d <- dirname(d)
+    }
+  }
+  stop("Cannot locate all_parameters.R (Paper_SAI control file); set the working ",
+       "directory to the project root or the Paper_SAI folder.", call. = FALSE)
+}
+source(file.path(.find_paper_root(), "all_parameters.R"))
 
 pow10_labels <- scales::label_math(10^.x)
 output_folder <- RESULTS_FOLDER_MAIN
@@ -407,6 +421,23 @@ tail_density_curves <- tail_density_overlay_data %>%
          weighted_density = density / max(density, na.rm = TRUE) * height_weight) %>%
   ungroup()
 
+tail_density_facet_levels <- c("1x interactions",
+                               "2x interactions",
+                               "3x interactions")
+
+tail_density_faceted_curves <- bind_rows(
+  tail_density_curves %>%
+    filter(condition_type != "full", subset_size %in% 1:3) %>%
+    mutate(interaction_facet = paste0(subset_size, "x interactions")),
+  purrr::map_dfr(tail_density_facet_levels, function(facet_label) {
+    tail_density_curves %>%
+      filter(condition_type == "full" | subset_size == 4) %>%
+      mutate(interaction_facet = facet_label)
+  })
+) %>%
+  mutate(interaction_facet = factor(interaction_facet,
+                                    levels = tail_density_facet_levels))
+
 tail_combo_key <- function(origins) {
   paste(sort(origins), collapse = "+")
 }
@@ -415,7 +446,7 @@ make_tail_density_gas_plot <- function(gas_value, gas_title) {
   gas_conditions <- tail_density_conditions %>%
     filter(gas == gas_value)
   gas_palette <- setNames(gas_conditions$plot_color, gas_conditions$condition)
-  gas_curves <- tail_density_curves %>%
+  gas_curves <- tail_density_faceted_curves %>%
     filter(gas == gas_value)
 
   gas_combo_nodes <- gas_conditions %>%
@@ -520,7 +551,7 @@ make_tail_density_gas_plot <- function(gas_value, gas_title) {
                  color = "black",
                  linetype = tail_density_linetypes[["4 tails"]],
                  linewidth = 0.8) +
-    geom_text(data = tibble(y = 0, label = "A+B+C+D: all four tails"),
+    geom_text(data = tibble(y = 0, label = "A+B+C+D: all interactions"),
               aes(x = 0.38, y = y, label = label),
               inherit.aes = FALSE,
               hjust = 0,
@@ -562,6 +593,7 @@ make_tail_density_gas_plot <- function(gas_value, gas_title) {
                 filter(condition_type != "full", subset_size == 4),
               aes(x = x, y = weighted_density, color = condition, linetype = tail_count),
               linewidth = 1.25) +
+    facet_wrap(~ interaction_facet, nrow = 1) +
     scale_x_continuous(labels = pow10_labels) +
     scale_color_manual(values = gas_palette, guide = "none") +
     scale_linetype_manual(values = tail_density_linetypes, guide = "none") +
@@ -570,6 +602,8 @@ make_tail_density_gas_plot <- function(gas_value, gas_title) {
     labs(title = gas_title) +
     ggpubr::theme_pubr() +
     theme(legend.position = "none",
+          strip.text = element_text(face = "bold", size = 9),
+          panel.spacing.x = grid::unit(0.35, "lines"),
           plot.title = element_text(face = "bold"))
 
   gas_density_panel + gas_custom_density_legend +
@@ -582,7 +616,7 @@ tail_bad_density_plot <- tail_bad_density_ch4 / tail_bad_density_co2 +
   patchwork::plot_layout(heights = c(1, 1)) +
   patchwork::plot_annotation(
     title = "Cost distributions under gas-specific bad input tails",
-    subtitle = "Grey: full distribution. Colored curves: singles plus worst 2- and 3-tail combinations by median and/or p95; heights are weighted by sample share."
+    subtitle = "Facets show 1x, 2x, and 3x tail interactions. Grey: all realizations; black: all interactions; colored curves are weighted by sample share."
   )
 
 tail_pair_index <- tidyr::crossing(row_input = tail_input_order,

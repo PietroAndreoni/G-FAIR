@@ -43,23 +43,33 @@
 #       Results_*/      archived Monte Carlo output read by the figures
 #       Figures/        = FIGURES_DIR  (figure PNGs are written here)
 #
-# PAPER_ROOT is found by walking up from the running script until all_parameters.R
-# is seen, so the whole pipeline is location-independent (Rscript or interactive).
-.ap_sp   <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-.ap_root <- if (length(.ap_sp) == 1) dirname(.ap_sp) else getwd()
-while (!file.exists(file.path(.ap_root, "all_parameters.R")) &&
-       dirname(.ap_root) != .ap_root) {
-  .ap_root <- dirname(.ap_root)
-}
-if (!file.exists(file.path(.ap_root, "all_parameters.R")))
-  .ap_root <- getwd()  # fallback: assume the working directory is Paper_SAI
+# PAPER_ROOT is found robustly so the whole pipeline is location-independent.
+# Candidates, in order: this file's own path when sourced (sys.frame $ofile), the
+# Rscript --file, and the working directory; each is searched upward and for a
+# Paper_SAI/ child, so it resolves under Rscript, RStudio "Source", or an
+# interactive console whose wd is at/under/above the project.
+.ap_root <- (function() {
+  starts <- c(unlist(lapply(sys.frames(), function(f) f$ofile)),
+              sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)),
+              getwd())
+  for (s in starts[nzchar(starts)]) {
+    d <- if (dir.exists(s)) s else dirname(s)
+    repeat {
+      if (file.exists(file.path(d, "all_parameters.R"))) return(d)
+      if (file.exists(file.path(d, "Paper_SAI", "all_parameters.R"))) return(file.path(d, "Paper_SAI"))
+      if (identical(dirname(d), d)) break
+      d <- dirname(d)
+    }
+  }
+  getwd()  # last-resort fallback: assume the working directory is Paper_SAI
+})()
 PAPER_ROOT   <- normalizePath(.ap_root, winslash = "/", mustWork = FALSE)
 PROJECT_ROOT <- dirname(PAPER_ROOT)                 # holds input/data/
 INPUT_DATA_DIR <- file.path(PROJECT_ROOT, "input", "data")
 RESULTS_ROOT <- file.path(PAPER_ROOT, "Results")    # parent of every results subfolder
                                                     # (raw gdx run folders + archived analyses)
 FIGURES_DIR  <- file.path(PAPER_ROOT, "Figures")    # figure PNGs are saved here
-rm(.ap_sp, .ap_root)
+rm(.ap_root)
 
 # Save a ggplot into FIGURES_DIR (created on demand). Used by every Plots/ script
 # so figures land in one place regardless of the working directory.

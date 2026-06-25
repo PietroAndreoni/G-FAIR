@@ -26,13 +26,27 @@ require_gdxtools()
 
 # Locate the Paper_SAI root (holds all_parameters.R) and load the control file.
 # Works from any working directory.
-.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
-while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
-  .root <- dirname(.root)
-if (!file.exists(file.path(.root, "all_parameters.R")))
-  stop("Cannot locate all_parameters.R (Paper_SAI root).")
-source(file.path(.root, "all_parameters.R"))
+# Locate the Paper_SAI folder (holds all_parameters.R) robustly so the script
+# works under Rscript (--file), RStudio "Source" (sys.frame $ofile), and an
+# interactive console whose working dir is at/under/above the project.
+.find_paper_root <- function() {
+  starts <- c(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)),
+              unlist(lapply(sys.frames(), function(f) f$ofile)), getwd())
+  for (s in starts[nzchar(starts)]) {
+    d <- if (dir.exists(s)) s else dirname(s)
+    repeat {
+      if (file.exists(file.path(d, "all_parameters.R")))
+        return(normalizePath(d, "/", FALSE))
+      if (file.exists(file.path(d, "Paper_SAI", "all_parameters.R")))
+        return(normalizePath(file.path(d, "Paper_SAI"), "/", FALSE))
+      if (identical(dirname(d), d)) break
+      d <- dirname(d)
+    }
+  }
+  stop("Cannot locate all_parameters.R (Paper_SAI control file); set the working ",
+       "directory to the project root or the Paper_SAI folder.", call. = FALSE)
+}
+source(file.path(.find_paper_root(), "all_parameters.R"))
 
 # ------------------------------------------------------------------
 # Script summary (synthetic):

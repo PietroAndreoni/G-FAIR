@@ -1,7 +1,20 @@
-# Locate montecarlo_utils.R next to this test, regardless of working directory.
-.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-.d <- if (length(.sp) == 1) dirname(.sp) else getwd()
-source(file.path(.d, "montecarlo_utils.R"))
+# Locate the Paper_SAI folder robustly (Rscript / RStudio "Source" / interactive
+# console at/under/above the project) and load the shared validators.
+.find_paper_root <- function() {
+  starts <- c(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)),
+              unlist(lapply(sys.frames(), function(f) f$ofile)), getwd())
+  for (s in starts[nzchar(starts)]) {
+    d <- if (dir.exists(s)) s else dirname(s)
+    repeat {
+      if (file.exists(file.path(d, "all_parameters.R"))) return(d)
+      if (file.exists(file.path(d, "Paper_SAI", "all_parameters.R"))) return(file.path(d, "Paper_SAI"))
+      if (identical(dirname(d), d)) break
+      d <- dirname(d)
+    }
+  }
+  stop("Cannot locate the Paper_SAI folder (all_parameters.R).", call. = FALSE)
+}
+source(file.path(.find_paper_root(), "Utilities", "montecarlo_utils.R"))
 
 assert_true <- function(x, msg) {
   if (!isTRUE(x)) stop(msg, call. = FALSE)
