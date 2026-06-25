@@ -1,4 +1,7 @@
-source("montecarlo_utils.R")
+# Locate montecarlo_utils.R next to this test, regardless of working directory.
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+.d <- if (length(.sp) == 1) dirname(.sp) else getwd()
+source(file.path(.d, "montecarlo_utils.R"))
 
 assert_true <- function(x, msg) {
   if (!isTRUE(x)) stop(msg, call. = FALSE)

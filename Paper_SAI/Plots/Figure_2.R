@@ -2,11 +2,13 @@ library(tidyverse)
 
 # Single control file for plotting settings / result folders. Resolve relative to
 # this script if launched via Rscript, else assume the project working directory.
-.all_params <- "all_parameters.R"
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
 
 output_folder <- RESULTS_FOLDER_MAIN
 damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv))
@@ -212,8 +214,8 @@ stat_analysis_diff <- ot_indices_1d(gsoat_data %>%
                                       select(-diff),
                                     gsoat_data %>% pull(diff), 
                                     M= GSA_M,
-                                    boot = T,
-                                    R = 100)
+                                    boot = GSA_BOOT,
+                                    R = GSA_R)
 lowerbound_diff <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, solver="1d")
 
 data <- data.frame(i=seq(1,1000),irr=NA,sample=NA)
@@ -299,10 +301,10 @@ ecs <- ggplot(damnorm) +
 void <- ggplot() + theme_void()
 fig2 <- (void + density_plot + void + plot_layout(widths = c(0.2,1,0.2)) ) / (dr + theta) / (ecs + alpha) + plot_layout(heights=c(1,0.6,0.6))
 
-ggsave("fig_2.png",fig2,width=12,height=12,dpi=300)
-ggsave("extfig_gsa.png",importances,width=12,height=6,dpi=300)
-ggsave("extfig_gsadiff.png",importance_diff,width=11,height=6,dpi=300)
-ggsave("extfig_fra.png",fraction,width=12,height=6,dpi=300)
+save_figure("fig_2.png",fig2,width=12,height=12,dpi=300)
+save_figure("extfig_gsa.png",importances,width=12,height=6,dpi=300)
+save_figure("extfig_gsadiff.png",importance_diff,width=11,height=6,dpi=300)
+save_figure("extfig_fra.png",fraction,width=12,height=6,dpi=300)
 
 if (FALSE) {
   damnorm %>% filter(gas=="co2" & scc<100) %>%

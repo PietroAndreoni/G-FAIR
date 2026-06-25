@@ -7,11 +7,13 @@ require_gdxtools()
 igdx(dirname(Sys.which('gams'))) # Please have gams in your PATH!
 
 # Single control file for plotting settings / input files / unit conversions.
-.all_params <- "all_parameters.R"
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
 
 # load data from Harmsen (provided in 2010 $/tonCeq)
 baseline <- read_parquet(HARMSEN_BASELINE_FIG3)
@@ -103,7 +105,7 @@ fig3 <- ggplot() +
                      name = expression(atop("Abatement cost ($/ton" * CH[4] * ")",
                                             "Abatement cost ($/ton" * CO[2] * "eq)",
                                             "Abatement cost ($/tonCeq)"))) #+ facet_wrap(year~.,)
-ggsave("fig_3.png",fig3,width=12,height=6,dpi=300)
+save_figure("fig_3.png",fig3,width=12,height=6,dpi=300)
 
 frac_damages <- damnpv %>% 
   pivot_longer(c(dirnpv,srmpnpv,ozpnpv,masknpv,damnpv),

@@ -25,18 +25,16 @@ require_gdxtools()
 
 start.time <- Sys.time()
 
-.mc_utils <- "montecarlo_utils.R"
+# Locate the Paper_SAI root (holds all_parameters.R), load the control file and
+# the shared validators / MC_* constants in Utilities/. Works from any wd.
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
-  .mc_utils <- file.path(dirname(.sp), .mc_utils)
-source(.mc_utils)
-
-# Single control file for every hard-coded input / constant (also pulled in
-# transitively by montecarlo_utils.R; sourced explicitly here for clarity).
-.all_params <- "all_parameters.R"
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
+source(file.path(PAPER_ROOT, "Utilities", "montecarlo_utils.R"))
 
 # extract names function rewritten using data.table/vector ops
 extract_names_dt <- function(files_vec) {
@@ -197,6 +195,9 @@ prepare_join_table <- function(filter_experiment) {
   base <- base[tot_forcing_exp, on = c("t", scenario_names)]
   base <- base[temp_exp, on = c("t", scenario_names)]
   base <- backsrm_exp[base, on = c("t",scenario_names)]
+  # forcing_srm is a GAMS parameter, so zero records are omitted from the gdx:
+  # the SRM background forcing is genuinely 0 outside the deployment window.
+  base[is.na(srm), srm := 0]
   base <- dsrm_exp[base, on = c("t",scenario_names)]
   base <- concch4_exp[base, on = c("t", scenario_names)]
   base <- concch4_srm[base, on = setdiff(c("t", scenario_names),"term") ]
@@ -239,8 +240,8 @@ Usage:
 
 Options:
 -i <input>             Path where the montecarlo id are
--o <results>           Where to save results
---res <output_folder>  name of the output folder (default: Results_montecarlo). For multiple folders separate with -
+-o <output>           Where to save output
+--res <results_folder>  name of the results folder (default: Results_montecarlo). For multiple folders separate with -
 --hpc <run_hpc>        T/F if running from Juno (T) or local (F)
 --chunk <chunk>        how many scenarios to run together
 --skip <skip>          skip or rerun existing scenarios
@@ -249,11 +250,14 @@ Options:
 
 opts <- docopt(doc, version = 'Montecarlo')
 
-res <- ifelse(is.null(opts[["res"]]), "Results_montecarlo", as.character(opts["res"]) )
-res <- str_split(res,"-")[[1]]
+# Folder names are user-specifiable; their locations are fixed. The GAMS .gdx are
+# read from Results/ (under Paper_SAI); id_montecarlo.csv is read from, and the
+# npc/scc CSV output is written to, the working folder under Sampling/.
+res <- ifelse(is.null(opts[["res"]]), RUN_RESULTS_DEFAULT, as.character(opts["res"]) )
+res <- file.path(RUN_RESULTS_PARENT, str_split(res,"-")[[1]])
 
-input_folder <- ifelse(is.null(opts[["i"]]), "Montecarlo", as.character(opts["i"]) )
-output_folder <- ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o"]) )
+input_folder <- file.path(MC_WORK_PARENT, ifelse(is.null(opts[["i"]]), MC_WORK_DEFAULT, as.character(opts["i"])) )
+output_folder <- file.path(MC_WORK_PARENT, ifelse(is.null(opts[["o"]]), MC_WORK_DEFAULT, as.character(opts["o"])) )
 
 # Which world to price: the terminated run (SRM switched off at the realization's
 # term_delta) or the run where SRM is never terminated. Termination probability
@@ -269,7 +273,7 @@ sccnosrm_diag_output <- paste0("sccnosrm_diag_", str_remove(name_output, "npc_")
 
 # Make sure the output folder exists (create it if not)
 if (!dir.exists(output_folder)) {
-  dir.create(output_folder)
+  dir.create(output_folder, recursive = TRUE)
 }
 
 if (any(!dir.exists(res)) ) stop("some of the folder specified do not exsist")
@@ -279,7 +283,7 @@ run_hpc = ifelse(is.null(opts[["hpc"]]), F, as.logical(opts["hpc"]) )
 N = ifelse(is.null(opts[["chunk"]]), 100, as.integer(opts["chunk"]) )
 skip_scenarios = ifelse(is.null(opts[["skip"]]), T, as.logical(opts["skip"]) )
 
-if(run_hpc==F) {igdx()} else {
+if(run_hpc==F) {igdx(dirname(Sys.which("gams")))} else {
   igdx(HPC_GAMS_PATH)
   logfile <- file(file.path(output_folder,"r_console.log"), open = "wt")
   sink(logfile)

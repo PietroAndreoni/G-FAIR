@@ -4,11 +4,13 @@ require(patchwork)
 
 # Single control file for plotting settings / result folders. Resolve relative to
 # this script if launched via Rscript, else assume the project working directory.
-.all_params <- "all_parameters.R"
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
 
 pow10_labels <- scales::label_math(10^.x)
 output_folder <- RESULTS_FOLDER_MAIN
@@ -696,5 +698,5 @@ tail_contrast_matrix <- patchwork::wrap_plots(tail_matrix_cells,
         plot.title = element_text(face = "bold"),
         plot.subtitle = element_text(size = 9))
 
-ggsave("fig_2_tail_contrast_matrix.png",tail_contrast_matrix,width=12,height=11,dpi=300)
-ggsave("fig_2_tail_density_overlay.png",tail_bad_density_plot,width=16,height=9,dpi=300)
+save_figure("fig_2_tail_contrast_matrix.png",tail_contrast_matrix,width=12,height=11,dpi=300)
+save_figure("fig_2_tail_density_overlay.png",tail_bad_density_plot,width=16,height=9,dpi=300)

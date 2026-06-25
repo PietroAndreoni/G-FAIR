@@ -22,26 +22,19 @@ Options:
 library(docopt)
 opts <- docopt(doc, version = 'Generate_montecarlo')
 
-# Shared distribution-fitting / sampling helpers: fit_distribution,
-# qlnorm_fit/qnorm_fit, truncated inverse-CDF samplers, split-normal and
-# fit_quantile_dist. Kept in one file so Generate and the test harness agree.
-.utils <- "distribution_utils.R"
+# Locate the Paper_SAI root (holds all_parameters.R) and load the control file
+# plus the shared helpers in Utilities/. Works from any working directory.
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .utils)))
-  .utils <- file.path(dirname(.sp), .utils)
-source(.utils)
-
-.mc_utils <- "montecarlo_utils.R"
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
-  .mc_utils <- file.path(dirname(.sp), .mc_utils)
-source(.mc_utils)
-
-# Single control file for every hard-coded input / distribution (also pulled in
-# transitively by montecarlo_utils.R; sourced explicitly here for clarity).
-.all_params <- "all_parameters.R"
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
+# Shared distribution-fitting / sampling helpers (fit_distribution, qlnorm_fit,
+# truncated inverse-CDF samplers, ...) and the strict validators / MC_* constants.
+source(file.path(PAPER_ROOT, "Utilities", "distribution_utils.R"))
+source(file.path(PAPER_ROOT, "Utilities", "montecarlo_utils.R"))
 
 # logical
 overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
@@ -58,7 +51,9 @@ n_scenarios <- as.integer(n_scenarios)
 if (length(seed) != 1 || is.na(seed)) stop("--seed must be an integer")
 
 # strings
-res = ifelse(is.null(opts[["o"]]), "Montecarlo", as.character(opts["o"]) )
+# Output folder: name is user-specifiable (-o); location is fixed under Sampling/.
+res_name = ifelse(is.null(opts[["o"]]), MC_WORK_DEFAULT, as.character(opts["o"]) )
+res = file.path(MC_WORK_PARENT, res_name)
 sampling_method = ifelse(is.null(opts[["method"]]), SAMPLING_METHOD, as.character(opts["method"]) )
 if (!sampling_method %in% c("sobol","montecarlo")) stop("--method must be 'sobol' or 'montecarlo'")
 
@@ -77,7 +72,7 @@ if (!keep_theta_uncertain) {
 
 # Make sure the file exists (create it if not)
 if (!dir.exists(res)) {
-  dir.create(res)
+  dir.create(res, recursive = TRUE)
 }
 
 cat("Generating data... \n")

@@ -7,18 +7,20 @@ require_gdxtools()
 igdx(dirname(Sys.which('gams'))) # Please have gams in your PATH!
 
 # Single control file for plotting settings / input files / unit conversions.
-.all_params <- "all_parameters.R"
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
 
 # load data from Harmsen (provided in 2010 $/tonCeq)
 baseline <- read_parquet(HARMSEN_BASELINE_FIG3_SI)
 macc <- read_parquet(HARMSEN_MACC_FIG3_SI)
 
 output_folders <- tibble(
-  output_folder = list.files(pattern = RESULTS_FOLDER_FIG3_PAT, full.names = TRUE)
+  output_folder = list.files(path = RESULTS_ROOT, pattern = RESULTS_FOLDER_FIG3_PAT, full.names = TRUE)
 ) %>%
   filter(dir.exists(output_folder)) %>%
   arrange(output_folder) %>%
@@ -98,7 +100,7 @@ macc_by_gas_w <- macc %>%
   summarize(value=sum(value,na.rm=TRUE),
             base=sum(base,na.rm=TRUE)) %>%
   ungroup() %>% mutate(miu=(base-value)/base, e=tolower(e)) %>%
-  mutate(cost=cost*AR4_GWP100[e]*C_PER_CO2*FIG3_CH4_EXTRA_FACTOR) %>%
+  mutate(cost=cost*AR4_GWP100[e]*C_PER_CO2*USD_DEFLATOR_2010_2020) %>%
   select(year,e,cost,miu)
 
 data <- damnpv %>%
@@ -143,5 +145,5 @@ fig3_si <- ggplot() +
                      name = expression(atop("Abatement cost ($/ton" * CH[4] * ")",
                                             "Abatement cost ($/ton" * CO[2] * "eq)"))) #+ facet_wrap(year~.,)
 
-ggsave("fig_3_SI.png",fig3_si,width=12,height=6,dpi=300)
+save_figure("fig_3_SI.png",fig3_si,width=12,height=6,dpi=300)
 

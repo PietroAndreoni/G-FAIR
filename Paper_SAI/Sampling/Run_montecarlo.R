@@ -24,18 +24,16 @@ Options:
 library(docopt)
 opts <- docopt(doc, version = 'Run_montecarlo')
 
-.mc_utils <- "montecarlo_utils.R"
+# Locate the Paper_SAI root (holds all_parameters.R), load the control file and
+# the shared validators / MC_* constants in Utilities/. Works from any wd.
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .mc_utils)))
-  .mc_utils <- file.path(dirname(.sp), .mc_utils)
-source(.mc_utils)
-
-# Single control file for every hard-coded input / constant (also pulled in
-# transitively by montecarlo_utils.R; sourced explicitly here for clarity).
-.all_params <- "all_parameters.R"
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
+source(file.path(PAPER_ROOT, "Utilities", "montecarlo_utils.R"))
 
 # logical
 run_parallel = ifelse(is.null(opts[["p"]]), F, as.logical(opts["p"]) )
@@ -49,13 +47,18 @@ start_job = ifelse(is.null(opts[["s"]]), 1, as.numeric(opts["s"]) )
 end_job = ifelse(is.null(opts[["e"]]), 100000, as.numeric(opts["e"]) )
 
 # strings
-res = ifelse(is.null(opts[["res"]]), "Results_montecarlo", as.character(opts["res"]) )
-input = ifelse(is.null(opts[["i"]]), "Montecarlo", as.character(opts["i"]) )
+# Folder names are user-specifiable; their locations are fixed. The GAMS .gdx
+# results go to Results/ (under Paper_SAI); id_montecarlo.csv is read from the
+# working folder under Sampling/.
+res_name = ifelse(is.null(opts[["res"]]), RUN_RESULTS_DEFAULT, as.character(opts["res"]) )
+res = file.path(RUN_RESULTS_PARENT, res_name)
+input_name = ifelse(is.null(opts[["i"]]), MC_WORK_DEFAULT, as.character(opts["i"]) )
+input = file.path(MC_WORK_PARENT, input_name)
 which_queue = ifelse(is.null(opts[["q"]]), HPC_QUEUE, as.character(opts["q"]) )
 
 # Make sure the file exists (create it if not)
 if (!dir.exists(res)) {
-  dir.create(res)
+  dir.create(res, recursive = TRUE)
 }
 
 problematic_existing <- data.frame()
@@ -104,7 +107,7 @@ gams <- paste0("gams FAIR.gms --experiment=srm",
               " --start_rampup=",data[i,]$start,
               " --end_rampup=",data[i,]$start+RAMP_UP_YEARS,
               " --termination_time=",data[i,]$term_delta,
-              " --results_folder=",res)
+              ' --results_folder="',res,'"')  # quoted: the resolved path may contain spaces
 
 results_name <-  paste0(data[i,]$rcp,
                         "_EXPsrmpulsemaskedterm_TER",data[i,]$term_delta,

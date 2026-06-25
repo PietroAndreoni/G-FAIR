@@ -24,12 +24,15 @@ pkgs <- c("data.table", "stringr", "docopt", "ggplot2")
 invisible(lapply(pkgs, require_package))
 require_gdxtools()
 
-# Single control file for every hard-coded input / constant.
-.all_params <- "all_parameters.R"
+# Locate the Paper_SAI root (holds all_parameters.R) and load the control file.
+# Works from any working directory.
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
 
 # ------------------------------------------------------------------
 # Script summary (synthetic):
@@ -260,8 +263,8 @@ Usage:
   Analyze_montecarlo_pulse_effects.R [-o <results>] [--res <output_folder>] [--hpc <run_hpc>] [--traj_q <traj_q>] [--chunk <chunk>] [--plot <plot_results>] [--rmse_window <rmse_window>]
 
 Options:
--o <results>           Results folder(s) with .gdx outputs. Separate multiple folders with -
---res <output_folder>  Output folder [default: Montecarlo]
+--res <results>        Results folder(s) with .gdx outputs. Separate multiple folders with -
+-o <output_folder>     Output folder [default: Montecarlo]
 --hpc <run_hpc>        T/F if running on HPC 
 --traj_q <traj_q>      Comma-separated percentile(s) for coherent-run selection (default: TRAJ_PROBS in all_parameters.R)
 --chunk <chunk>        Number of matched scenario-groups processed per batch (default: PULSE_CHUNK_N in all_parameters.R)
@@ -271,9 +274,12 @@ Options:
 
 opts <- docopt(doc, version = "Analyze_montecarlo_pulse_effects")
 
-res <- ifelse(is.null(opts[["o"]]), "Results_montecarlo", as.character(opts[["o"]]))
-res <- str_split(res, "-")[[1]]
-output_folder <- ifelse(is.null(opts[["res"]]), "Montecarlo", as.character(opts[["res"]]))
+# Folder names are user-specifiable; their locations are fixed. The GAMS .gdx are
+# read from Results/ (under Paper_SAI); the pulse-effect CSV output is written to
+# the working folder under Sampling/.
+res <- ifelse(is.null(opts[["res"]]), RUN_RESULTS_DEFAULT, as.character(opts[["res"]]))
+res <- file.path(RUN_RESULTS_PARENT, str_split(res, "-")[[1]])
+output_folder <- file.path(MC_WORK_PARENT, ifelse(is.null(opts[["o"]]), MC_WORK_DEFAULT, as.character(opts[["o"]])))
 run_hpc <- ifelse(is.null(opts[["hpc"]]), F, as.logical(opts[["hpc"]]))
 traj_q <- ifelse(is.null(opts[["traj_q"]]), paste(TRAJ_PROBS, collapse = ","), as.character(opts[["traj_q"]]))
 traj_probs <- as.numeric(trimws(str_split(traj_q, ",")[[1]]))
@@ -287,11 +293,11 @@ if (is.na(chunk_n) || chunk_n <= 0) stop("--chunk must be a positive integer")
 if (is.na(plot_results)) stop("--plot must be T or F")
 if (is.na(rmse_window) || rmse_window <= 0) stop("--rmse_window must be a positive number")
 
-if (!dir.exists(output_folder)) dir.create(output_folder)
+if (!dir.exists(output_folder)) dir.create(output_folder, recursive = TRUE)
 if (any(!dir.exists(res))) stop("Some result folders do not exist")
 
 if (run_hpc == FALSE) {
-  igdx()
+  igdx(dirname(Sys.which("gams")))
 } else {
   igdx(HPC_GAMS_PATH)
   logfile <- file(file.path(output_folder, "r_console_pulse_effects.log"), open = "wt")

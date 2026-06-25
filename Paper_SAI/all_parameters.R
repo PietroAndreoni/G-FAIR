@@ -8,10 +8,7 @@
 # with a recognizable name and a one-line explanation of what it does.
 #
 # Intended use: `source("all_parameters.R")` at the top of each script and refer
-# to the names below instead of repeating literals. (The scripts are NOT yet
-# wired to this file -- see the "WIRING" note at the bottom and the inconsistency
-# report that accompanied this file. Until they are wired in, this file is the
-# documented source of truth and the place to change a value once.)
+# to the names below instead of repeating literals. 
 #
 # Conventions used throughout the pipeline:
 #   * Time is in FAIR model-year units: t = 1 is calendar year 2020, so
@@ -31,6 +28,64 @@
 # script elsewhere -- see the inconsistency report. Values here are set to what
 # the LIVE code currently does, so wiring this in is behaviour-preserving.
 # =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# FOLDER LAYOUT  (resolved so scripts work from any working directory)
+# -----------------------------------------------------------------------------
+# Project tree:
+#   <PROJECT_ROOT>/                 e.g. .../G-FAIR
+#     input/data/                   shared inputs (Harmsen MACCs, etc.)
+#     Paper_SAI/        = PAPER_ROOT (this file lives here)
+#       Sampling/       Generate / Run / Analyze* scripts
+#       Utilities/      distribution_utils.R, montecarlo_utils.R, tests
+#       Plots/          Figure_*.R, Figures_additional.R
+#       Results_*/      archived Monte Carlo output read by the figures
+#       Figures/        = FIGURES_DIR  (figure PNGs are written here)
+#
+# PAPER_ROOT is found by walking up from the running script until all_parameters.R
+# is seen, so the whole pipeline is location-independent (Rscript or interactive).
+.ap_sp   <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+.ap_root <- if (length(.ap_sp) == 1) dirname(.ap_sp) else getwd()
+while (!file.exists(file.path(.ap_root, "all_parameters.R")) &&
+       dirname(.ap_root) != .ap_root) {
+  .ap_root <- dirname(.ap_root)
+}
+if (!file.exists(file.path(.ap_root, "all_parameters.R")))
+  .ap_root <- getwd()  # fallback: assume the working directory is Paper_SAI
+PAPER_ROOT   <- normalizePath(.ap_root, winslash = "/", mustWork = FALSE)
+PROJECT_ROOT <- dirname(PAPER_ROOT)                 # holds input/data/
+INPUT_DATA_DIR <- file.path(PROJECT_ROOT, "input", "data")
+RESULTS_ROOT <- file.path(PAPER_ROOT, "Results")    # parent of every results subfolder
+                                                    # (raw gdx run folders + archived analyses)
+FIGURES_DIR  <- file.path(PAPER_ROOT, "Figures")    # figure PNGs are saved here
+rm(.ap_sp, .ap_root)
+
+# Save a ggplot into FIGURES_DIR (created on demand). Used by every Plots/ script
+# so figures land in one place regardless of the working directory.
+save_figure <- function(filename, plot, ...) {
+  if (!dir.exists(FIGURES_DIR)) dir.create(FIGURES_DIR, recursive = TRUE)
+  ggplot2::ggsave(file.path(FIGURES_DIR, filename), plot, ...)
+}
+
+# Monte Carlo pipeline working folders. The folder NAMES stay user-overridable on
+# each script's command line; their PARENT directories in the tree are fixed here.
+#   * MC_WORK_PARENT/<name>  (default name "Montecarlo", under Sampling/):
+#       Generate writes id_montecarlo.csv here; Run + Analyze read id from here;
+#       Analyze writes its npc/scc CSV output here.
+#   * RUN_RESULTS_PARENT/<name>  (default name "Results", under Paper_SAI/Results/):
+#       Run writes the raw GAMS .gdx results into a named subfolder of Results/;
+#       Analyze reads the .gdx from there. So the default location is
+#       Paper_SAI/Results/Results, and e.g. `-i myrun` -> Paper_SAI/Results/myrun.
+SAMPLING_DIR        <- file.path(PAPER_ROOT, "Sampling")
+MC_WORK_PARENT      <- SAMPLING_DIR
+MC_WORK_DEFAULT     <- "Montecarlo"
+RUN_RESULTS_PARENT  <- RESULTS_ROOT
+RUN_RESULTS_DEFAULT <- "Results"
+
+# Resolve a comma/dash-free folder NAME (or several '-'-separated names) to its
+# absolute path(s) under the given fixed parent. Used by the Sampling scripts.
+mc_resolve_folder <- function(name, parent) file.path(parent, name)
 
 
 # -----------------------------------------------------------------------------
@@ -260,10 +315,13 @@ QUANTILE_TYPE <- 8L     # stats::quantile type used everywhere in the pulse anal
 # -----------------------------------------------------------------------------
 # 9. FIGURE / PLOTTING SETTINGS  (Figure_1.R, Figure_2.R, Figure_3*.R)
 # -----------------------------------------------------------------------------
-# Result folders the figures read from (currently hard-coded per figure).
-RESULTS_FOLDER_MAIN     <- "Results_1903"               # Figure_1, Figure_2
-RESULTS_FOLDER_FIG3     <- "Results_base_1903_angle30"  # Figure_3
-RESULTS_FOLDER_FIG3_PAT <- "^Results_base_1903"         # Figure_3_SI folder glob
+# Result folders the figures read from, anchored under PAPER_ROOT so they resolve
+# from any working directory. To plot a fresh working run instead of the archived
+# results, set the env var MC_RESULTS_MAIN / MC_RESULTS_FIG3 to that folder, e.g.
+#   MC_RESULTS_MAIN=Paper_SAI/Sampling/Montecarlo Rscript Plots/Figure_1.R
+RESULTS_FOLDER_MAIN     <- Sys.getenv("MC_RESULTS_MAIN", unset = file.path(RESULTS_ROOT, "Results_1903"))              # Figure_1, Figure_2
+RESULTS_FOLDER_FIG3     <- Sys.getenv("MC_RESULTS_FIG3", unset = file.path(RESULTS_ROOT, "Results_base_1903_angle30")) # Figure_3
+RESULTS_FOLDER_FIG3_PAT <- "^Results_base_1903"  # Figure_3_SI glob (used with path=RESULTS_ROOT)
 
 # Ribbon/line percentiles and time window shared by the trajectory figures.
 FIG_PERCENTILES  <- c(0.05, 0.25, 0.5, 0.75, 0.95)
@@ -309,15 +367,14 @@ AR4_GWP100 <- c(c2f6 = 12200, c6f14 = 9300, cf4 = 7390,
 #       Figure_3_SI.R / the Harmsen input script) and errored standalone. Both
 #       figures now source this file and use AR4_GWP100.
 
-# Harmsen non-CO2 MACC input files. Figure_3 and Figure_3_SI now both read the
-# same .parquet inputs (Figure_3_SI was switched off the .lz4 variant by hand).
-HARMSEN_BASELINE_FIG3    <- "input/data/harmsen_nonco2_baseline.parquet"
-HARMSEN_MACC_FIG3        <- "input/data/harmsen_nonco2_macc.parquet"
-HARMSEN_BASELINE_FIG3_SI <- "input/data/harmsen_nonco2_baseline.parquet"
-HARMSEN_MACC_FIG3_SI     <- "input/data/harmsen_nonco2_macc.parquet"
-MACC_CO2_FILE            <- "input/data/macc_ed_full_2022.lz4.parquet"
-# NOTE: MACC_CO2_FILE is referenced by both figures' macc_co2 block but is not
-#       present in the repo tree -- confirm it exists before running.
+# Harmsen non-CO2 MACC input files (under PROJECT_ROOT/input/data). Figure_3 and
+# Figure_3_SI now both read the same .parquet inputs (Figure_3_SI was switched
+# off the .lz4 variant by hand).
+HARMSEN_BASELINE_FIG3    <- file.path(INPUT_DATA_DIR, "harmsen_nonco2_baseline.parquet")
+HARMSEN_MACC_FIG3        <- file.path(INPUT_DATA_DIR, "harmsen_nonco2_macc.parquet")
+HARMSEN_BASELINE_FIG3_SI <- file.path(INPUT_DATA_DIR, "harmsen_nonco2_baseline.parquet")
+HARMSEN_MACC_FIG3_SI     <- file.path(INPUT_DATA_DIR, "harmsen_nonco2_macc.parquet")
+MACC_CO2_FILE            <- file.path(INPUT_DATA_DIR, "macc_ed_full_2022.lz4.parquet")
 
 # Figure_2 sensitivity-panel axis transforms / limits (documented, not all wired):
 FIG2_TERM_YEAR_BASE <- 2020      # x = 2020 + term  (termination calendar year)
@@ -328,22 +385,3 @@ FIG2_ECS_TENTHS     <- 10        # ecs plotted as ecs/10 [K]
 FIG2_PANEL_QLO      <- 0.05      # per-panel x-axis trimming quantiles
 FIG2_PANEL_QHI      <- 0.95
 FIG2_TAIL_QUANTILE  <- 0.95      # "bad tail" threshold for the contrast matrix
-
-
-# -----------------------------------------------------------------------------
-# WIRING NOTE
-# -----------------------------------------------------------------------------
-# To make this the ONLY place these values are decided, each script should:
-#   1. source("all_parameters.R") near the top (after the self-locating logic
-#      already used for distribution_utils.R / montecarlo_utils.R), and
-#   2. replace the literal with the name above, e.g. in Generate_montecarlo.R:
-#         ecs_par <- do.call(function(...) fit_distribution(..., return_params=TRUE), ECS_DIST)
-#         pulse_choices <- PULSE_CHOICES
-#         theta <- round(qlnorm_fit_trunc(unit_draws[,SOBOL_COLUMN_MAP["theta"]],
-#                        lo=THETA_TRUNC["lo"], hi=THETA_TRUNC["hi"],
-#                        median=THETA_DIST$median, q5=THETA_DIST$q5, q95=THETA_DIST$q95),
-#                        THETA_ROUND)
-#   montecarlo_utils.R currently DEFINES MC_T_HORIZON / MC_HAZARD_* and is sourced
-#   by everything; if this file is wired in there, keep the MC_* aliases pointing
-#   at T_HORIZON / HAZARD_LO / HAZARD_HI so the validators and tests stay intact.
-# =============================================================================

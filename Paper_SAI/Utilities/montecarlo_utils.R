@@ -4,13 +4,13 @@
 # file). Source it once here and expose the historical MC_* names as aliases so
 # the validators below, Generate/Analyze, and the test harness keep working.
 if (!exists("T_HORIZON")) {
-  .ap <- "all_parameters.R"
   .apsp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-  if (length(.apsp) == 1 && file.exists(file.path(dirname(.apsp), .ap)))
-    .ap <- file.path(dirname(.apsp), .ap)
-  if (!file.exists(.ap))
+  .apr <- if (length(.apsp) == 1) dirname(.apsp) else getwd()
+  while (!file.exists(file.path(.apr, "all_parameters.R")) && dirname(.apr) != .apr)
+    .apr <- dirname(.apr)
+  if (!file.exists(file.path(.apr, "all_parameters.R")))
     stop("montecarlo_utils.R: cannot locate all_parameters.R (the parameter control file).")
-  source(.ap)
+  source(file.path(.apr, "all_parameters.R"))
 }
 
 MC_SAMPLER_VERSION <- SAMPLER_VERSION
@@ -91,8 +91,10 @@ mc_assert_key_set_equal <- function(expected, observed, key_cols, context) {
     stop(context, " cannot compare key sets; missing columns: ",
          paste(missing_cols, collapse = ", "), call. = FALSE)
   }
-  expected_key <- unique(expected[key_cols])
-  observed_key <- unique(observed[key_cols])
+  # Column subset via data.frame semantics so this works for both data.frame and
+  # data.table inputs (DT[<character>] would be a keyed-join, not a column select).
+  expected_key <- unique(as.data.frame(expected, stringsAsFactors = FALSE)[key_cols])
+  observed_key <- unique(as.data.frame(observed, stringsAsFactors = FALSE)[key_cols])
   expected_s <- do.call(paste, c(expected_key, sep = "\r"))
   observed_s <- do.call(paste, c(observed_key, sep = "\r"))
   missing_s <- setdiff(expected_s, observed_s)

@@ -3,11 +3,13 @@ library(data.table)
 
 # Single control file for plotting settings / result folders. Resolve relative to
 # this script if launched via Rscript, else assume the project working directory.
-.all_params <- "all_parameters.R"
 .sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-if (length(.sp) == 1 && file.exists(file.path(dirname(.sp), .all_params)))
-  .all_params <- file.path(dirname(.sp), .all_params)
-source(.all_params)
+.root <- if (length(.sp) == 1) dirname(.sp) else getwd()
+while (!file.exists(file.path(.root, "all_parameters.R")) && dirname(.root) != .root)
+  .root <- dirname(.root)
+if (!file.exists(file.path(.root, "all_parameters.R")))
+  stop("Cannot locate all_parameters.R (Paper_SAI root).")
+source(file.path(.root, "all_parameters.R"))
 
 output_folder <- RESULTS_FOLDER_MAIN
 selected_traj <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "trajectories")), read.csv)) 
@@ -88,5 +90,5 @@ forc <- ggplot2::ggplot() +
 
 require(patchwork)
 fig1 <- forc + temp + plot_layout(axis_titles = "collect")
-ggsave("fig_1.png",fig1,width=12,height=6,dpi=300)
+save_figure("fig_1.png",fig1,width=12,height=6,dpi=300)
 

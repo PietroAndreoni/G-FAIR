@@ -14,8 +14,12 @@
 # =============================================================================
 
 # ---- load the live functions (single source of truth) -----------------------
-if (!file.exists("distribution_utils.R")) stop("Run from the repo root (distribution_utils.R not found).")
-source("distribution_utils.R")
+# Locate distribution_utils.R next to this test, regardless of working directory.
+.sp <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+.d <- if (length(.sp) == 1) dirname(.sp) else getwd()
+if (!file.exists(file.path(.d, "distribution_utils.R")))
+  stop("distribution_utils.R not found next to this test.")
+source(file.path(.d, "distribution_utils.R"))
 
 # ---- ground-truth theoretical moments/quantiles -----------------------------
 ln_inputs <- function(mu, s) list(
