@@ -6,7 +6,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Generate_montecarlo.R [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--base <main_scenario>] [--angle <angle>] [--method <sampling_method>] [--seed <seed>] [--diagnostics <diagnostics>]
+  Generate_montecarlo.R [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--base <main_scenario>] [--angle <angle>] [--method <sampling_method>] [--seed <seed>] [--diagnostics <diagnostics>] [--filter <filter_pct>]
 
 Options:
 -o <res>                     Path of the input/outputs
@@ -17,6 +17,7 @@ Options:
 --angle <angle>              theta value for --base=T (default: 10; use na to keep theta uncertain)
 --method <sampling_method>   "sobol" (quasi-random, default) or "montecarlo" (pseudo-random)
 --diagnostics <diagnostics>  T/F write a PDF comparing the drawn vs theoretical distributions (default F)
+--filter <filter_pct>        Cut the upper tail of the log-normal params above this percentile (e.g. 95). Default: off for full MC, 99 for --base=T; use na to disable.
 ' -> doc
 
 library(docopt)
@@ -54,6 +55,21 @@ source(file.path(PAPER_ROOT, "Utilities", "montecarlo_utils.R"))
 overwrite_data = ifelse(is.null(opts[["w"]]), T, as.logical(opts["w"]) )
 main_scenario = ifelse(is.null(opts[["base"]]), F, as.logical(opts["base"]) )
 diagnostics = ifelse(is.null(opts[["diagnostics"]]), F, as.logical(opts["diagnostics"]) )
+
+# Tail filter percentile (upper-tail cut on the log-normal params, see
+# TAIL_FILTER_COLS in all_parameters.R). Default: off (100) for the full Monte
+# Carlo, TAIL_FILTER_BASE_DEFAULT for --base=T; "na"/"off"/"none" disables it.
+filter_opt = if (is.null(opts[["filter"]])) NA_character_ else as.character(opts[["filter"]])
+if (is.na(filter_opt) || !nzchar(filter_opt)) {
+  filter_pct <- if (main_scenario) TAIL_FILTER_BASE_DEFAULT else 100
+} else if (str_to_lower(str_trim(filter_opt)) %in% c("na","off","none")) {
+  filter_pct <- 100
+} else {
+  filter_pct <- suppressWarnings(as.numeric(filter_opt))
+  if (length(filter_pct) != 1 || is.na(filter_pct) || filter_pct <= 0 || filter_pct > 100)
+    stop("--filter must be a percentile in (0, 100], or 'na' to disable")
+}
+filter_frac <- filter_pct / 100
 
 # numeric
 n_scenarios = ifelse(is.null(opts[["n"]]), N_SCENARIOS_DEFAULT, as.numeric(opts["n"]) )
@@ -163,6 +179,19 @@ map_discrete <- function(u, choices) {
 # (the column->parameter mapping is SOBOL_COLUMN_MAP in all_parameters.R)
 n_dim <- N_SOBOL_DIM
 
+# Per-column tail-cut factors: scaling a column's uniform u -> u*filter_frac
+# restricts it to (0, filter_frac), i.e. inverse-CDF sampling of the distribution
+# truncated above its (100*filter_frac)-th percentile and renormalized. Only the
+# log-normal columns in TAIL_FILTER_COLS are cut; all others keep factor 1. The
+# map is monotone in u, so the Sobol low-discrepancy structure is preserved.
+col_cut <- rep(1, n_dim)
+if (filter_frac < 1) {
+  idx <- SOBOL_COLUMN_MAP[intersect(TAIL_FILTER_COLS, names(SOBOL_COLUMN_MAP))]
+  col_cut[idx] <- filter_frac
+  cat(sprintf("Tail filter: cutting %s above the %g-th percentile\n",
+              paste(TAIL_FILTER_COLS, collapse = ", "), filter_pct))
+}
+
 if (sampling_method == "sobol") {
   if (!mc_is_power_of_two(n_scenarios)) {
     warning("Sobol sample size is not a power of two; balance guarantees are strongest at powers of two.", call. = FALSE)
@@ -188,6 +217,11 @@ if (sampling_method == "sobol") {
 }
 unit_draw_indices <- seq.int(start_draw_index, end_draw_index)
 
+# Apply the tail-cut to the selected columns before any transform runs. Columns
+# not in TAIL_FILTER_COLS keep factor 1 (unchanged); the joint ecs>tcr redraws
+# below are scaled separately with col_cut[1:2].
+unit_draws <- sweep(unit_draws, 2, col_cut, `*`)
+
 # Transform uniforms into the correlated joint lognormal (ecs, tcr) marginals.
 draw_joint_ecs_tcr <- function(u_mat) {
   u_mat <- pmin(pmax(u_mat, 1e-10), 1 - 1e-10)  # guard qnorm() against 0/1
@@ -198,7 +232,7 @@ draw_joint_ecs_tcr <- function(u_mat) {
   )
 }
 
-draw_replacement_ecs_tcr <- function(draw_indices, iter) {
+draw_replacement_ecs_tcr <- function(draw_indices, iter, col_cut2 = c(1, 1)) {
   old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
     get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
   } else {
@@ -219,7 +253,9 @@ draw_replacement_ecs_tcr <- function(draw_indices, iter) {
     redraw_seed <- as.integer((as.numeric(seed) +
       as.numeric(draw_indices[j]) * 10007 + iter * 104729) %% .Machine$integer.max)
     set.seed(redraw_seed)
-    redraw_u[j, ] <- runif(2)
+    # Same per-column tail-cut as the Sobol draws (see col_cut); keeps redrawn
+    # replacements inside the truncated support.
+    redraw_u[j, ] <- runif(2) * col_cut2
   }
   draw_joint_ecs_tcr(redraw_u)
 }
@@ -238,7 +274,7 @@ while (length(invalid) > 0) {
   if (iter > 10000) {
     stop("Unable to obtain n_draws with ecs > tcr after repeated redraws.")
   }
-  redraw <- draw_replacement_ecs_tcr(unit_draw_indices[invalid], iter)
+  redraw <- draw_replacement_ecs_tcr(unit_draw_indices[invalid], iter, col_cut[1:2])
   ecs_draw[invalid] <- redraw$ecs
   tcr_draw[invalid] <- redraw$tcr
   invalid <- which(round(ecs_draw * 10, 0) <= round(tcr_draw * 10, 0))
