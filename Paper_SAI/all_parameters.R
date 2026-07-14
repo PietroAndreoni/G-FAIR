@@ -125,6 +125,18 @@ SOBOL_COLUMN_MAP <- c(
   mortality_ozone = 16, vsl = 17, vsl_eta = 18, dg = 19
 )
 
+# Tail filter (see Generate_montecarlo.R --filter): optionally truncate the UPPER
+# tail of the log-normal parameters at a percentile by scaling that column's
+# Sobol/MC uniform by pct/100 before the inverse-CDF transform. Restricting the
+# uniform to (0, pct/100) is exactly the distribution truncated above its pct-th
+# percentile and renormalized; the map u -> u*(pct/100) is monotone, so the Sobol
+# net stays low-discrepancy (Sobol-safe; truncate-&-renormalize, no boundary
+# spike). ecs/tcr are cut per-column (ecs exactly at its pct-th percentile; tcr
+# slightly above its own, as it mixes both copula uniforms) with the ECS>TCR
+# constraint intact.
+TAIL_FILTER_COLS         <- c("ecs", "tcr", "theta", "alpha", "mortality_srm")
+TAIL_FILTER_BASE_DEFAULT <- 99   # percentile used when --base T and --filter absent
+
 
 # -----------------------------------------------------------------------------
 # 1. CLIMATE SENSITIVITY  (joint lognormal ECS-TCR, FAIR v1.3 style)
@@ -329,7 +341,7 @@ QUANTILE_TYPE <- 8L     # stats::quantile type used everywhere in the pulse anal
 # from any working directory. To plot a fresh working run instead of the archived
 # results, set the env var MC_RESULTS_MAIN / MC_RESULTS_FIG3 to that folder, e.g.
 #   MC_RESULTS_MAIN=Paper_SAI/Sampling/Montecarlo Rscript Plots/Figure_1.R
-RESULTS_FOLDER_MAIN     <- Sys.getenv("MC_RESULTS_MAIN", unset = file.path(RESULTS_ROOT, "Results_1903"))              # Figure_1, Figure_2
+RESULTS_FOLDER_MAIN     <- Sys.getenv("MC_RESULTS_MAIN", unset = file.path(RESULTS_ROOT, "Results_sobol"))              # Figure_1, Figure_2
 RESULTS_FOLDER_FIG3     <- Sys.getenv("MC_RESULTS_FIG3", unset = file.path(RESULTS_ROOT, "Results_base_1903_angle30")) # Figure_3
 RESULTS_FOLDER_FIG3_PAT <- "^Results_base_1903"  # Figure_3_SI glob (used with path=RESULTS_ROOT)
 
