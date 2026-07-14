@@ -127,6 +127,52 @@ npv_aggregator <- function(DT, keep_names = all_names) {
   return(res_long)
 }
 
+# Total (NOT marginal) cost of the srm-only world (the "srmnopulse" run: SRM
+# deployed, no GHG pulse), summed over every damage/cost component and evaluated
+# across the FULL FAIR horizon. A realization is flagged `bad` when this total
+# reaches or exceeds gross world product (gwpt) in ANY year -- such a world is
+# economically implausible and is dropped from the results (and, when ALL
+# realizations behind a scenario are bad, from the pulse-effects plots via
+# dropped_srmnopulse_scenarios.csv). Returns one row per id with a `bad` flag.
+# The srm-run total is gas- and termination-independent, so we key on the srm
+# climate scenario only. Uses the srm-run fields already carried by
+# prepare_join_table(): temp_srm, temp_base, srm (background forcing), concch4_base.
+srmnopulse_total_damage_flags <- function(DT, id_col, climate_keys) {
+  D <- copy(DT)
+  compute_gwpt(D)
+  D[, srm_dam           := gwpt * alpha * pmax(0, temp_srm)^2]
+  D[, srm_dir_cost      := srm * forctoTg * TgtoUSD]
+  D[, srm_pollution_tot := vsl * globaltouspc * (gwpt / gwp)^(vsl_eta) * srm * forctoTg * mortality_srm]
+  D[, srm_tropoz        := vsl * globaltouspc * (gwpt / gwp)^(vsl_eta) * mortality_ozone * concch4_base]
+  D[, srm_masking_tot   := gwpt * alpha * pmax(0, temp_base)^2 * (1 - cos(theta * pi / 180))]
+  D[, srm_total_damage  := srm_dam + srm_dir_cost + srm_pollution_tot + srm_tropoz + srm_masking_tot]
+  mc_assert_no_missing(D, c("gwpt", "srm_total_damage"), "srmnopulse_total_damage_flags")
+  D[, .(bad = any(srm_total_damage >= gwpt)), by = c(id_col, climate_keys)]
+}
+
+# Build the shared dropped-scenarios file consumed by Analyze_montecarlo_pulse_effects.R
+# from the comprehensive per-draw discard list. A srm-climate scenario is fully
+# dropped only when EVERY draw behind it (across term and both gases) was discarded --
+# whether by the srmnopulse damage filter or by FAIR-run infeasibility. Totals come
+# from id_montecarlo, so the decision is correct across chunk boundaries and --skip
+# resumes. Also collapses any duplicate discard rows accumulated across resumes.
+write_dropped_scenarios <- function() {
+  if (!file.exists(discarded_runs_path)) return(invisible(NULL))
+  disc <- unique(fread(discarded_runs_path))
+  fwrite(disc, file = discarded_runs_path)                 # de-duplicate in place
+  for (k in climate_keys) set(disc, j = k, value = as.character(disc[[k]]))
+  totals <- id_montecarlo[, .(n_total = uniqueN(ID)), by = climate_keys]
+  for (k in climate_keys) set(totals, j = k, value = as.character(totals[[k]]))
+  discounts <- disc[, .(n_disc = uniqueN(ID)), by = climate_keys]
+  merged <- merge(discounts, totals, by = climate_keys, all.x = TRUE)
+  dropped_scen <- merged[!is.na(n_total) & n_disc >= n_total, ..climate_keys]
+  dropped_scen_path <- file.path(output_folder, dropped_scen_output)
+  fwrite(dropped_scen, file = dropped_scen_path)
+  cat("Discard filter: wrote", nrow(dropped_scen), "fully-dropped scenario(s) to",
+      dropped_scen_path, "and", nrow(disc), "discarded run row(s) to",
+      discarded_runs_path, "\n")
+}
+
 make_scc_diagnostics <- function(DT, key_cols, value_cols, context) {
   mc_assert_no_missing(DT, c(key_cols, "t", value_cols),
                        paste0(context, " diagnostics inputs"))
@@ -284,6 +330,15 @@ name_output <- if (run_termination) "npc_output.csv" else "npc_noterm_output.csv
 scc_diag_output <- paste0("scc_diag_", str_remove(name_output, "npc_"))
 sccnosrm_diag_output <- paste0("sccnosrm_diag_", str_remove(name_output, "npc_"))
 
+# Discard bookkeeping. discarded_runs.csv is the comprehensive per-draw list (both
+# gases, reason-tagged: damage_filter / fair_infeasible / fair_infeasible_sibling)
+# kept for later statistical analysis; dropped_srmnopulse_scenarios.csv is the
+# derived climate-scenario drop list consumed by Analyze_montecarlo_pulse_effects.R.
+# Both are termination-independent, so they use fixed names across termination modes.
+discarded_runs_output <- "discarded_runs.csv"
+discarded_runs_path   <- file.path(output_folder, discarded_runs_output)
+dropped_scen_output   <- "dropped_srmnopulse_scenarios.csv"
+
 
 # Make sure the output folder exists (create it if not)
 if (!dir.exists(output_folder)) {
@@ -365,6 +420,12 @@ scenario_names <- setdiff(names(sanitized_names), c("gdx","file","experiment"))
 pulse_scenarios <- setdiff(scenario_names, c("cool_rate","geo_end","geo_start","term"))
 base_scenarios <- setdiff(pulse_scenarios, c("gas","pulse_time"))
 
+# srm-only world climate scenario (termination- and gas-independent): the key the
+# srmnopulse damage filter aggregates on, and which the pulse-effects script joins.
+climate_keys <- c("ecs", "tcr", "rcp", "cool_rate", "pulse_time", "geo_start", "geo_end")
+# Column schema of the comprehensive per-draw discard list (both gases, reason-tagged).
+discard_cols <- c("ID", scenario_names, "reason")
+
 
 ## pre-filter by experiment so we don't repeat this in the loop
 dt_srmpt   <- sanitized_names[experiment == "srmpulsemaskedterm"]
@@ -406,48 +467,68 @@ if(file.exists(file.path(output_folder, name_output))) {
   }
 } else {skip_scenarios <- F}
 
+# Keep the discard list in step with the main output: a fresh/replace run (--skip=F)
+# rebuilds it from scratch; a resumed run (--skip=T) appends to it and
+# write_dropped_scenarios() de-duplicates at the end.
+if (!skip_scenarios && file.exists(discarded_runs_path)) file.remove(discarded_runs_path)
+
 expected_gases <- sort(unique(na.omit(sanitized_names$gas)))
 if (length(expected_gases) == 0L) stop("No gas-specific GDX files found in results folders.")
 
 id_scenarios <- unique(id_montecarlo[, c("ID", setdiff(scenario_names, "gas")), with = FALSE])
-expected_runs <- id_scenarios[, .(gas = expected_gases), by = names(id_scenarios)]
-setcolorder(expected_runs, c("ID", scenario_names))
+full_expected <- id_scenarios[, .(gas = expected_gases), by = names(id_scenarios)]
+setcolorder(full_expected, c("ID", scenario_names))
 
+# Map every (draw, gas) to its GDX experiment files over the FULL grid (independent
+# of --skip) so FAIR-run infeasibility is judged across BOTH gases: a draw is usable
+# only if every gas produced a complete experiment set. If any gas is missing /
+# infeasible, the whole draw is discarded (both gases) -- if one gas completed but
+# the other did not, both are dropped -- and recorded to the shared discard list.
+runs_all <- copy(full_expected)
+runs_all[, f_srmpulsemaskedterm := dt_srmpt[runs_all, on = k_all, mult = "first"]$gdx]
+runs_all[, f_srmpulsemasked     := dt_srmptm[runs_all, on = k_no_term, mult = "first"]$gdx]
+runs_all[, f_srmpulse           := dt_srmp[runs_all, on = k_no_term, mult = "first"]$gdx]
+runs_all[, f_srm                := dt_srm[runs_all, on = k_no_term, mult = "first"]$gdx]
+runs_all[, f_pulse              := dt_pulse[runs_all, on = k_pulse, mult = "first"]$gdx]
+runs_all[, f_base               := dt_base[runs_all, on = k_base, mult = "first"]$gdx]
+
+file_cols <- grep("^f_", names(runs_all), value = TRUE)
+runs_all[, complete_run := stats::complete.cases(runs_all[, ..file_cols])]
+runs_all[, draw_ok := all(complete_run), by = "ID"]
+
+infeasible_runs <- runs_all[draw_ok == FALSE]
+if (nrow(infeasible_runs) > 0L) {
+  infeasible_runs[, missing_experiments := apply(.SD, 1, function(z) paste(names(z)[is.na(z)], collapse = ", ")), .SDcols = file_cols]
+  details <- paste(capture.output(print(head(
+    unique(infeasible_runs[, c("ID", scenario_names, "missing_experiments"), with = FALSE]), 20))), collapse = "\n")
+  # Never produced a complete set of GDX files for every gas, so the draw cannot be
+  # analyzed. Warn (not fatal) but DROP the whole draw; leaving it in would break the
+  # downstream key-set assertions. Record it so the discard is available for later
+  # analysis and for the pulse-effects script. (Switch warning -> stop to re-abort.)
+  warning(uniqueN(infeasible_runs$ID), " Monte Carlo draw(s) discarded because at least ",
+          "one gas is missing a complete GDX experiment set; BOTH gases are dropped:\n", details)
+  inf_rec <- infeasible_runs[, c("ID", scenario_names), with = FALSE]
+  # The failing gas -> fair_infeasible; a gas that completed but is dropped only
+  # because its sibling failed -> fair_infeasible_sibling.
+  inf_rec[, reason := ifelse(infeasible_runs$complete_run, "fair_infeasible_sibling", "fair_infeasible")]
+  fwrite(inf_rec[, ..discard_cols], file = discarded_runs_path, append = file.exists(discarded_runs_path))
+}
+
+feasible_runs <- runs_all[draw_ok == TRUE]
+feasible_runs[, c("complete_run", "draw_ok") := NULL]
+if (nrow(feasible_runs) == 0L) {
+  stop("No Monte Carlo draws have a complete set of GDX experiment files for every gas; nothing to analyze.")
+}
+
+# Apply the --skip (resume) filter to the feasible draws only.
+required_runs <- copy(feasible_runs)
 if (skip_scenarios == TRUE && nrow(completed_runs) > 0L) {
-  expected_runs <- expected_runs[!completed_runs, on = c("ID", "gas")]
+  required_runs <- required_runs[!completed_runs, on = c("ID", "gas")]
 }
-
-if (nrow(expected_runs) == 0L) {
-  cat("No new Monte Carlo runs to analyze after applying existing-output skip.\n")
-  quit(save = "no", status = 0)
-}
-
-required_runs <- copy(expected_runs)
-required_runs[, f_srmpulsemaskedterm := dt_srmpt[required_runs, on = k_all, mult = "first"]$gdx]
-required_runs[, f_srmpulsemasked     := dt_srmptm[required_runs, on = k_no_term, mult = "first"]$gdx]
-required_runs[, f_srmpulse           := dt_srmp[required_runs, on = k_no_term, mult = "first"]$gdx]
-required_runs[, f_srm                := dt_srm[required_runs, on = k_no_term, mult = "first"]$gdx]
-required_runs[, f_pulse              := dt_pulse[required_runs, on = k_pulse, mult = "first"]$gdx]
-required_runs[, f_base               := dt_base[required_runs, on = k_base, mult = "first"]$gdx]
-
-file_cols <- grep("^f_", names(required_runs), value = TRUE)
-complete_mask <- stats::complete.cases(required_runs[, ..file_cols])
-missing_required <- required_runs[!complete_mask]
-if (nrow(missing_required) > 0L) {
-  missing_required[, missing_experiments := apply(.SD, 1, function(z) paste(names(z)[is.na(z)], collapse = ", ")), .SDcols = file_cols]
-  details <- paste(capture.output(print(head(missing_required[, c("ID", scenario_names, "missing_experiments"), with = FALSE], 20))), collapse = "\n")
-  # These realizations never produced a complete set of GDX experiment files, so
-  # they cannot be analyzed. Warn instead of aborting, but DROP them: if they stay
-  # in required_runs they remain in all_experiments / expected_chunk_keys and every
-  # downstream key-set assertion fails with "missing expected keys" for IDs that
-  # can never appear in the output. (Switch warning -> stop to make it fatal again.)
-  warning(nrow(missing_required), " Monte Carlo realization(s) are missing required GDX ",
-          "experiment files and will be SKIPPED:\n", details)
-  required_runs <- required_runs[complete_mask]
-}
-
 if (nrow(required_runs) == 0L) {
-  stop("No Monte Carlo realizations have a complete set of GDX experiment files; nothing to analyze.")
+  cat("No new Monte Carlo runs to analyze after applying existing-output skip.\n")
+  write_dropped_scenarios()
+  quit(save = "no", status = 0)
 }
 
 all_experiments <- unique(required_runs[, ..scenario_names])
@@ -513,6 +594,30 @@ cat("Analyzing the data... \n")
 # the termination distribution is already carried by the term_delta draws.
 selected_experiment <- if (run_termination) "srmpulsemaskedterm" else "srmpulsemasked"
 dt_sel <- prepare_join_table(selected_experiment)
+
+# --- srmnopulse damage filter (full horizon) ----------------------------------
+# Flag every draw whose srm-only world total damage >= GDP in any year (pooled over
+# BOTH gases, so one gas breaching rejects the whole draw), record the discarded
+# draws (both gases) to the shared discard list, then drop them from this chunk's
+# key set. The scc/npc tables below inner-join on expected_chunk_keys, so dropping
+# here propagates to every output while the key-set assertions still hold.
+srm_flags <- srmnopulse_total_damage_flags(dt_sel, "ID", climate_keys)
+bad_ids <- srm_flags[bad == TRUE, unique(ID)]
+if (length(bad_ids) > 0L) {
+  dmg_rec <- unique(dt_sel[ID %in% bad_ids, c("ID", scenario_names), with = FALSE])
+  dmg_rec[, reason := "damage_filter"]
+  fwrite(dmg_rec[, ..discard_cols], file = discarded_runs_path, append = file.exists(discarded_runs_path))
+  cat("srmnopulse filter (chunk", n_chunk, "): dropping",
+      expected_chunk_keys[ID %in% bad_ids, .N], "run(s) across",
+      length(bad_ids), "draw(s) where total srm-run damage >= GDP.\n")
+  dt_sel <- dt_sel[!ID %in% bad_ids]
+  expected_chunk_keys <- expected_chunk_keys[!ID %in% bad_ids]
+}
+if (nrow(expected_chunk_keys) == 0L) {
+  cat("All runs in chunk", n_chunk, "dropped by the srmnopulse filter; skipping chunk.\n")
+  next
+}
+
 dt_sel <- dt_sel[ t >= as.numeric(pulse_time) ]
 mc_assert_key_set_equal(expected_chunk_keys, unique(dt_sel[, .(ID = as.character(ID), gas = as.character(gas))]),
                         c("ID", "gas"), paste0("NPC selected input chunk ", n_chunk))
@@ -571,7 +676,7 @@ scc_diag <- make_scc_diagnostics(
 )
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
-scc[, dam := gwpt * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) )]
+scc[, dam := gwpt * pmin(1, alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) ) ]
 mc_assert_no_missing(scc, c("tropoz_pollution", "dam"), paste0("SCC-with-SRM computed costs chunk ", n_chunk))
 scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))),
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
@@ -687,6 +792,11 @@ fwrite(scc_diag, file = file.path(output_folder, scc_diag_output), append = TRUE
 fwrite(scc_nosrm_diag, file = file.path(output_folder, sccnosrm_diag_output), append = TRUE)
 
 }
+
+# Now that every chunk's discards (damage filter) and the pre-loop discards
+# (FAIR infeasibility) have been recorded, build the shared climate-scenario drop
+# list for Analyze_montecarlo_pulse_effects.R and de-duplicate the discard list.
+write_dropped_scenarios()
 
 cat("Saved output to:", file.path(output_folder, name_output), "\n")
 

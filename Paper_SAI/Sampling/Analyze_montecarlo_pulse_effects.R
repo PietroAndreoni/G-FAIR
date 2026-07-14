@@ -487,6 +487,39 @@ cat("Reloading compact effects and computing statistics...\n")
 effects <- fread(effects_file)
 srm_masked <- if (file.exists(srm_timeseries_file)) fread(srm_timeseries_file) else data.table()
 
+# --- discard filter -----------------------------------------------------------
+# Drop the srm-climate scenarios that Analyze_montecarlo.R fully discarded, listed
+# in dropped_srmnopulse_scenarios.csv in the same working folder: scenarios where
+# EVERY draw was rejected, either by the srmnopulse damage filter (srm-only world
+# total damage >= GDP in some year) or by FAIR-run infeasibility (a gas missing a
+# complete GDX set, dropping both gases). The list is termination- and gas-
+# independent, so it keys on the srm climate scenario and only touches the
+# srmpulse-srm pair (the no-SRM pulse-base pair is left as-is). Keys are compared
+# as character strings so fread's type inference can't cause a join type-mismatch.
+dropped_file <- file.path(output_folder, "dropped_srmnopulse_scenarios.csv")
+if (file.exists(dropped_file)) {
+  dropped_scen <- fread(dropped_file)
+  drop_keys <- intersect(c("ecs", "tcr", "rcp", "cool_rate", "pulse_time", "geo_start", "geo_end"),
+                         names(dropped_scen))
+  if (nrow(dropped_scen) > 0 && length(drop_keys) > 0) {
+    make_key <- function(DT, keys) do.call(paste, c(lapply(keys, function(k) as.character(DT[[k]])), sep = "\r"))
+    dropped_str <- make_key(dropped_scen, drop_keys)
+    if (all(drop_keys %in% names(effects))) {
+      before <- nrow(effects)
+      effects <- effects[!(pair == "srmpulse-srm" & make_key(effects, drop_keys) %in% dropped_str)]
+      cat("srmnopulse filter: removed", before - nrow(effects), "effect row(s) for",
+          length(dropped_str), "dropped scenario(s).\n")
+    }
+    if (nrow(srm_masked) > 0 && all(drop_keys %in% names(srm_masked))) {
+      srm_masked <- srm_masked[!(make_key(srm_masked, drop_keys) %in% dropped_str)]
+    }
+  }
+} else {
+  cat("Note: no", basename(dropped_file), "found in", output_folder,
+      "- run Analyze_montecarlo.R first to enable the srmnopulse damage filter.",
+      "Proceeding unfiltered.\n")
+}
+
 stats_by_gas <- rbindlist(list(
   quantile_summary(effects, "Dtemp", c("gas", "t_rel")),
   quantile_summary(effects, "Dforc", c("gas", "t_rel"))
