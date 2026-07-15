@@ -128,16 +128,30 @@ npv_aggregator <- function(DT, keep_names = all_names) {
 }
 
 # Total (NOT marginal) cost of the srm-only world (the "srmnopulse" run: SRM
-# deployed, no GHG pulse), summed over every damage/cost component and evaluated
-# across the FULL FAIR horizon. A realization is flagged `bad` when this total
-# reaches or exceeds gross world product (gwpt) in ANY year -- such a world is
-# economically implausible and is dropped from the results (and, when ALL
-# realizations behind a scenario are bad, from the pulse-effects plots via
-# dropped_srmnopulse_scenarios.csv). Returns one row per id with a `bad` flag.
-# The srm-run total is gas- and termination-independent, so we key on the srm
-# climate scenario only. Uses the srm-run fields already carried by
-# prepare_join_table(): temp_srm, temp_base, srm (background forcing), concch4_base.
-srmnopulse_total_damage_flags <- function(DT, id_col, climate_keys) {
+# deployed at its baseline schedule, no GHG pulse), summed over every damage/cost
+# component and evaluated across the FULL FAIR horizon. Returns, per id, the FIRST
+# model-year in which that total reaches or exceeds gross world product (gwpt) --
+# the point beyond which the world is no longer economically meaningful -- or NA
+# for a realization that never breaches.
+#
+# Realizations are NOT rejected on this basis. The caller keeps the draw and
+# truncates its time series at first_breach_t, so the NPVs are taken over the
+# economically meaningful window only (see the truncation block below). The breach
+# is permanent in practice -- once total damage reaches GDP it stays there for the
+# rest of the horizon -- so a single cut point loses nothing that a
+# breach-by-breach mask would keep.
+#
+# Every field here is read from the srm-only world, as intended:
+#   temp_srm, concch4_base  <- experiment "srm"  (baseline SRM active, no pulse)
+#   temp_base               <- experiment "base" (no SRM; counterfactual for masking)
+#   srm                     <- forcing_srm, the baseline SAI deployment schedule.
+# forcing_srm is a GAMS *parameter* set once per scenario and never re-assigned
+# across experiments (termination acts on the SRM *variable*, which is identically
+# 0 in the srm run), so taking it from the selected experiment's gdx yields the
+# srm-run values. That makes the total gas- and termination-independent, so we key
+# on the srm climate scenario only and pool over gases (the earliest breach across
+# gases governs the draw).
+srmnopulse_first_breach_t <- function(DT, id_col, climate_keys) {
   D <- copy(DT)
   compute_gwpt(D)
   D[, srm_dam           := gwpt * alpha * pmax(0, temp_srm)^2]
@@ -146,8 +160,44 @@ srmnopulse_total_damage_flags <- function(DT, id_col, climate_keys) {
   D[, srm_tropoz        := vsl * globaltouspc * (gwpt / gwp)^(vsl_eta) * mortality_ozone * concch4_base]
   D[, srm_masking_tot   := gwpt * alpha * pmax(0, temp_base)^2 * (1 - cos(theta * pi / 180))]
   D[, srm_total_damage  := srm_dam + srm_dir_cost + srm_pollution_tot + srm_tropoz + srm_masking_tot]
-  mc_assert_no_missing(D, c("gwpt", "srm_total_damage"), "srmnopulse_total_damage_flags")
-  D[, .(bad = any(srm_total_damage >= gwpt)), by = c(id_col, climate_keys)]
+  mc_assert_no_missing(D, c("gwpt", "srm_total_damage"), "srmnopulse_first_breach_t")
+  D[, .(first_breach_t = {
+          breached <- as.numeric(t)[srm_total_damage >= gwpt]
+          if (length(breached) == 0L) NA_real_ else min(breached)
+        }), by = c(id_col, climate_keys)]
+}
+
+# First year in which the NO-SRM world's own total damage reaches GDP. That world
+# carries no SAI at all, so its total is climate damage plus ozone mortality from the
+# ambient CH4 concentration -- none of the deployment-cost, sulfate-pollution or
+# imperfect-masking terms that enter the srm world's total. Mirrors
+# srmnopulse_first_breach_t in every other respect (full horizon, NA = never breaches).
+# Both temp_base and concch4_base are read from experiment "base", so this is the
+# no-SRM world judged by its own standard rather than the srm world's.
+nosrm_first_breach_t <- function(DT, id_col) {
+  D <- copy(DT)
+  compute_gwpt(D)
+  D[, nosrm_dam    := gwpt * alpha * pmax(0, temp_base)^2]
+  D[, nosrm_tropoz := vsl * globaltouspc * (gwpt / gwp)^(vsl_eta) * mortality_ozone * concch4_base]
+  D[, nosrm_total  := nosrm_dam + nosrm_tropoz]
+  mc_assert_no_missing(D, c("gwpt", "nosrm_total"), "nosrm_first_breach_t")
+  D[, .(first_breach_t = {
+          breached <- as.numeric(t)[nosrm_total >= gwpt]
+          if (length(breached) == 0L) NA_real_ else min(breached)
+        }), by = id_col]
+}
+
+# Drop every timestep from a draw's first breach onward. `breach` carries one
+# first_breach_t per ID (NA = never breaches, keep the full horizon). The breach
+# year itself goes: total damage already meets GDP there, so it is the first
+# non-economic step rather than the last economic one.
+# ID is character in some tables (expected_chunk_keys) and integer in others, so
+# match on as.character() rather than a join. An ID absent from `breach` gets NA and
+# is kept whole, which is also the right answer for "never breaches".
+truncate_at_breach <- function(DT, breach) {
+  cut_t <- stats::setNames(as.numeric(breach$first_breach_t), as.character(breach$ID))
+  ct <- cut_t[as.character(DT$ID)]
+  DT[is.na(ct) | as.numeric(DT$t) < ct]
 }
 
 # Build the shared dropped-scenarios file consumed by Analyze_montecarlo_pulse_effects.R
@@ -163,7 +213,14 @@ write_dropped_scenarios <- function() {
   for (k in climate_keys) set(disc, j = k, value = as.character(disc[[k]]))
   totals <- id_montecarlo[, .(n_total = uniqueN(ID)), by = climate_keys]
   for (k in climate_keys) set(totals, j = k, value = as.character(totals[[k]]))
-  discounts <- disc[, .(n_disc = uniqueN(ID)), by = climate_keys]
+  # A climate scenario counts as fully dropped only when its draws were genuinely
+  # discarded (damage filter / fair_infeasible). not_run draws were never submitted,
+  # and the damage_truncated* reasons mark draws that are KEPT (just shortened), so
+  # none of these may mark a scenario as dropped for the pulse-effects plots.
+  disc_real <- if ("reason" %in% names(disc)) {
+    disc[!reason %in% c("not_run", "damage_truncated", "damage_truncated_nosrm")]
+  } else disc
+  discounts <- disc_real[, .(n_disc = uniqueN(ID)), by = climate_keys]
   merged <- merge(discounts, totals, by = climate_keys, all.x = TRUE)
   dropped_scen <- merged[!is.na(n_total) & n_disc >= n_total, ..climate_keys]
   dropped_scen_path <- file.path(output_folder, dropped_scen_output)
@@ -408,6 +465,19 @@ for (cname in c("seed", "draw_index", "term_delay")) id_montecarlo[, (cname) := 
 id_montecarlo[, censored_termination := as.logical(censored_termination)]
 setnames(id_montecarlo, c("pulse","cool","term_delta","start","term"), c("pulse_time","cool_rate","term","geo_start","geo_end"))
 
+# id_montecarlo carries three kinds of column: FAIR/scenario inputs, post-processing
+# inputs (post_cols), and provenance metadata (metadata_cols: sampler_version,
+# sampling_method, seed, draw_index, term_delay, censored_termination). The metadata
+# is not a model input, so it must stay in id_montecarlo.csv and never leak into the
+# analysis outputs. Split the table here:
+#   * id_montecarlo_full keeps everything and feeds ONLY the discard record, so
+#     discarded_runs.csv is a self-contained per-draw dump (inputs + provenance).
+#   * id_montecarlo is the "minimum" version used for EVERY downstream merge, so
+#     npc/scc outputs carry only inputs + computed results.
+# Keyed by ID, so the metadata can always be re-attached from id_montecarlo.csv.
+id_montecarlo_full <- copy(id_montecarlo)
+id_montecarlo <- id_montecarlo[, setdiff(names(id_montecarlo), metadata_cols), with = FALSE]
+
 cat("Loaded", nrow(id_montecarlo), "montecarlo realizations from id_montecarlo.csv \n")
 
 # Post-processing parameters (incl. the deterministic main-scenario overrides
@@ -423,8 +493,39 @@ base_scenarios <- setdiff(pulse_scenarios, c("gas","pulse_time"))
 # srm-only world climate scenario (termination- and gas-independent): the key the
 # srmnopulse damage filter aggregates on, and which the pulse-effects script joins.
 climate_keys <- c("ecs", "tcr", "rcp", "cool_rate", "pulse_time", "geo_start", "geo_end")
-# Column schema of the comprehensive per-draw discard list (both gases, reason-tagged).
-discard_cols <- c("ID", scenario_names, "reason")
+# The comprehensive per-draw discard list is a self-contained dump: every column of
+# id_montecarlo (FAIR inputs + post-processing inputs + provenance metadata) plus the
+# gas and the reason tag. Discarded draws never reach npc/scc, so this file is the only
+# record of their parameters -- which is why, unlike the outputs, it DOES keep metadata.
+# `breach_t` is the model timestep at which the relevant world's total damage first
+# reaches GDP -- the cut point applied to that draw -- in the SAME units as the
+# `pulse` column carried over from id_montecarlo, so the two are directly comparable:
+#   reason = damage_truncated       -> srm-world cut, applied to npc_output/scc_output
+#   reason = damage_truncated_nosrm -> no-SRM-world cut, applied to sccnosrm_output
+#   reason = damage_filter          -> srm-world breach at/before pulse: nothing to price
+#   reason = fair_infeasible/not_run-> NA (no breach involved)
+# Every record carries the column (NA where not applicable) because fwrite(append=TRUE)
+# writes rows positionally and would silently misalign a ragged schema.
+append_discards <- function(x) {
+  if (!"breach_t" %in% names(x)) x <- copy(x)[, breach_t := NA_real_]
+  rec <- unique(x[, .(ID = as.character(ID), gas = as.character(gas),
+                      reason = as.character(reason), breach_t = as.numeric(breach_t))])
+  rec <- merge(rec, id_montecarlo_full, by = "ID", all.x = TRUE, allow.cartesian = TRUE)
+  setcolorder(rec, c(names(id_montecarlo_full), "gas", "reason", "breach_t"))
+  # fwrite(append=TRUE) writes rows positionally without checking the header, so a file
+  # left over from an older schema (e.g. one predating breach_t, kept across a --skip=T
+  # resume) would be silently corrupted. Fail loudly instead.
+  if (file.exists(discarded_runs_path)) {
+    existing_cols <- names(fread(discarded_runs_path, nrows = 0L))
+    if (!identical(existing_cols, names(rec))) {
+      stop("Existing ", discarded_runs_output, " has columns [",
+           paste(existing_cols, collapse = ", "), "] but this run appends [",
+           paste(names(rec), collapse = ", "), "]. Delete the file or rerun with --skip=F.",
+           call. = FALSE)
+    }
+  }
+  fwrite(rec, file = discarded_runs_path, append = file.exists(discarded_runs_path))
+}
 
 
 ## pre-filter by experiment so we don't repeat this in the loop
@@ -459,6 +560,9 @@ if(file.exists(file.path(output_folder, name_output))) {
     file.remove(file.path(output_folder, paste0("sccnosrm_",str_remove(name_output,"npc_"))) )
     file.remove(file.path(output_folder, scc_diag_output))
     file.remove(file.path(output_folder, sccnosrm_diag_output))
+    # The discard list is a per-run output too: leaving it in place would append this
+    # run's records to a previous run's (stale draws, and a stale column schema).
+    if (file.exists(discarded_runs_path)) file.remove(discarded_runs_path)
   } else {
     if (!all(c("ID", "gas") %in% names(existing_output))) {
       stop("Existing ", name_output, " is legacy output without ID/gas keys. Rerun with --skip=F to replace it.")
@@ -496,22 +600,48 @@ file_cols <- grep("^f_", names(runs_all), value = TRUE)
 runs_all[, complete_run := stats::complete.cases(runs_all[, ..file_cols])]
 runs_all[, draw_ok := all(complete_run), by = "ID"]
 
+# Monte Carlo jobs are launched in id_montecarlo order (ID == draw_index == Sobol
+# order) as a contiguous prefix, so the largest ID that produced ANY gdx marks how
+# far the launcher actually got. Draws past this frontier were never submitted and
+# are tagged "not_run" (rather than "fair_infeasible", i.e. submitted-but-failed),
+# so an incomplete/partial launch doesn't masquerade as thousands of infeasible runs.
+# Only the SRM-family experiments are draw-specific evidence of a launch: f_base is
+# keyed on (rcp,ecs,tcr) alone and f_pulse adds only (gas,pulse_time), so both are
+# shared by many later, never-submitted draws and would inflate the frontier.
+srm_file_cols <- intersect(c("f_srm", "f_srmpulse", "f_srmpulsemasked", "f_srmpulsemaskedterm"), file_cols)
+runs_all[, any_file := Reduce(`|`, lapply(.SD, Negate(is.na))), .SDcols = srm_file_cols]
+attempted_frontier <- suppressWarnings(max(as.integer(runs_all[any_file == TRUE, ID])))
+if (!is.finite(attempted_frontier)) attempted_frontier <- 0L
+runs_all[, any_file := NULL]
+
 infeasible_runs <- runs_all[draw_ok == FALSE]
 if (nrow(infeasible_runs) > 0L) {
   infeasible_runs[, missing_experiments := apply(.SD, 1, function(z) paste(names(z)[is.na(z)], collapse = ", ")), .SDcols = file_cols]
-  details <- paste(capture.output(print(head(
-    unique(infeasible_runs[, c("ID", scenario_names, "missing_experiments"), with = FALSE]), 20))), collapse = "\n")
-  # Never produced a complete set of GDX files for every gas, so the draw cannot be
-  # analyzed. Warn (not fatal) but DROP the whole draw; leaving it in would break the
-  # downstream key-set assertions. Record it so the discard is available for later
-  # analysis and for the pulse-effects script. (Switch warning -> stop to re-abort.)
-  warning(uniqueN(infeasible_runs$ID), " Monte Carlo draw(s) discarded because at least ",
-          "one gas is missing a complete GDX experiment set; BOTH gases are dropped:\n", details)
   inf_rec <- infeasible_runs[, c("ID", scenario_names), with = FALSE]
-  # The failing gas -> fair_infeasible; a gas that completed but is dropped only
-  # because its sibling failed -> fair_infeasible_sibling.
-  inf_rec[, reason := ifelse(infeasible_runs$complete_run, "fair_infeasible_sibling", "fair_infeasible")]
-  fwrite(inf_rec[, ..discard_cols], file = discarded_runs_path, append = file.exists(discarded_runs_path))
+  # not_run: draw beyond the launch frontier, i.e. never submitted. Otherwise the
+  # FAIR run was submitted but did not produce a complete set for every gas: the
+  # failing gas -> fair_infeasible; a gas that completed but is dropped only because
+  # its sibling failed -> fair_infeasible_sibling.
+  inf_rec[, reason := fifelse(as.integer(ID) > attempted_frontier, "not_run",
+                       fifelse(infeasible_runs$complete_run, "fair_infeasible_sibling", "fair_infeasible"))]
+  n_not_run <- uniqueN(inf_rec[reason == "not_run", ID])
+  n_failed  <- uniqueN(inf_rec[reason != "not_run", ID])
+  # Genuine solve failures (submitted but incomplete) warrant a warning; never-run
+  # draws are just an incomplete launch, so they only get an informational note.
+  if (n_failed > 0L) {
+    details <- paste(capture.output(print(head(
+      unique(infeasible_runs[as.integer(ID) <= attempted_frontier,
+             c("ID", scenario_names, "missing_experiments"), with = FALSE]), 20))), collapse = "\n")
+    warning(n_failed, " Monte Carlo draw(s) submitted but missing a complete GDX ",
+            "experiment set for at least one gas; BOTH gases dropped (fair_infeasible):\n", details)
+  }
+  if (n_not_run > 0L) {
+    cat("Note:", n_not_run, "Monte Carlo draw(s) beyond the launch frontier (ID >",
+        attempted_frontier, ") were never submitted; recorded as not_run.\n")
+  }
+  # DROP the whole draw regardless (leaving it in breaks the downstream key-set
+  # assertions) and record it for later analysis / the pulse-effects script.
+  append_discards(inf_rec[, .(ID, gas, reason)])
 }
 
 feasible_runs <- runs_all[draw_ok == TRUE]
@@ -595,23 +725,53 @@ cat("Analyzing the data... \n")
 selected_experiment <- if (run_termination) "srmpulsemaskedterm" else "srmpulsemasked"
 dt_sel <- prepare_join_table(selected_experiment)
 
-# --- srmnopulse damage filter (full horizon) ----------------------------------
-# Flag every draw whose srm-only world total damage >= GDP in any year (pooled over
-# BOTH gases, so one gas breaching rejects the whole draw), record the discarded
-# draws (both gases) to the shared discard list, then drop them from this chunk's
-# key set. The scc/npc tables below inner-join on expected_chunk_keys, so dropping
-# here propagates to every output while the key-set assertions still hold.
-srm_flags <- srmnopulse_total_damage_flags(dt_sel, "ID", climate_keys)
-bad_ids <- srm_flags[bad == TRUE, unique(ID)]
-if (length(bad_ids) > 0L) {
-  dmg_rec <- unique(dt_sel[ID %in% bad_ids, c("ID", scenario_names), with = FALSE])
+# --- srmnopulse damage truncation (full horizon) ------------------------------
+# Locate, per draw, the first year in which the srm-only world's total damage
+# reaches GDP. Draws are NOT rejected on this basis: they are flagged in
+# discarded_runs.csv (reason "damage_truncated") and every timestep from the breach
+# onward is dropped, so the NPVs below run over each draw's economically meaningful
+# window only. `srm_breach` is carried to the scc blocks so all three outputs
+# (npc, scc, scc_nosrm) are truncated at the SAME year for a given draw: Figure_2
+# forms per-draw ratios of these NPVs (npc_srm / scc_nosrm, npc_srm / scc_srm), which
+# are only meaningful if every term spans the same horizon.
+#
+# The one case that still has to be rejected: a draw breaching at or before its own
+# pulse_time has no valid window left at all (the NPV would be an empty sum), so it
+# keeps reason "damage_filter" and is dropped as before.
+srm_breach <- srmnopulse_first_breach_t(dt_sel, "ID", climate_keys)
+# Collapse to exactly one row per ID (earliest breach wins) so the lookup in
+# truncate_at_breach cannot resolve an ID to an arbitrary one of several rows.
+srm_breach <- srm_breach[, .(first_breach_t = if (all(is.na(first_breach_t))) NA_real_
+                             else min(first_breach_t, na.rm = TRUE)), by = ID]
+mc_assert_unique_key(srm_breach, "ID", paste0("srmnopulse breach table chunk ", n_chunk))
+pulse_by_id <- unique(dt_sel[, .(ID, pulse_time = as.numeric(pulse_time))])
+srm_breach <- merge(srm_breach, pulse_by_id, by = "ID", all.x = TRUE)
+
+empty_ids <- srm_breach[!is.na(first_breach_t) & first_breach_t <= pulse_time, unique(ID)]
+trunc_ids <- srm_breach[!is.na(first_breach_t) & first_breach_t >  pulse_time, unique(ID)]
+
+if (length(trunc_ids) > 0L) {
+  trunc_rec <- unique(dt_sel[ID %in% trunc_ids, c("ID", scenario_names), with = FALSE])
+  trunc_rec[, reason := "damage_truncated"]
+  trunc_rec <- merge(trunc_rec, srm_breach[, .(ID, breach_t = first_breach_t)],
+                     by = "ID", all.x = TRUE)
+  append_discards(trunc_rec[, .(ID, gas, reason, breach_t)])
+  cat("srmnopulse truncation (chunk", n_chunk, "):", length(trunc_ids),
+      "draw(s) flagged and truncated at first year where total srm-run damage >= GDP",
+      "(kept in all outputs).\n")
+}
+if (length(empty_ids) > 0L) {
+  dmg_rec <- unique(dt_sel[ID %in% empty_ids, c("ID", scenario_names), with = FALSE])
   dmg_rec[, reason := "damage_filter"]
-  fwrite(dmg_rec[, ..discard_cols], file = discarded_runs_path, append = file.exists(discarded_runs_path))
+  dmg_rec <- merge(dmg_rec, srm_breach[, .(ID, breach_t = first_breach_t)],
+                   by = "ID", all.x = TRUE)
+  append_discards(dmg_rec[, .(ID, gas, reason, breach_t)])
   cat("srmnopulse filter (chunk", n_chunk, "): dropping",
-      expected_chunk_keys[ID %in% bad_ids, .N], "run(s) across",
-      length(bad_ids), "draw(s) where total srm-run damage >= GDP.\n")
-  dt_sel <- dt_sel[!ID %in% bad_ids]
-  expected_chunk_keys <- expected_chunk_keys[!ID %in% bad_ids]
+      expected_chunk_keys[ID %in% empty_ids, .N], "run(s) across",
+      length(empty_ids), "draw(s) breaching at or before their own pulse_time.\n")
+  dt_sel <- dt_sel[!ID %in% empty_ids]
+  expected_chunk_keys <- expected_chunk_keys[!ID %in% empty_ids]
+  srm_breach <- srm_breach[!ID %in% empty_ids]
 }
 if (nrow(expected_chunk_keys) == 0L) {
   cat("All runs in chunk", n_chunk, "dropped by the srmnopulse filter; skipping chunk.\n")
@@ -623,6 +783,11 @@ mc_assert_key_set_equal(expected_chunk_keys, unique(dt_sel[, .(ID = as.character
                         c("ID", "gas"), paste0("NPC selected input chunk ", n_chunk))
 mc_assert_complete_time_window(dt_sel, c("ID", "gas"),
                                paste0("NPC selected input chunk ", n_chunk))
+# Truncate AFTER the completeness assertion: the assertion validates that the gdx
+# delivered a full [pulse_time, T_HORIZON] window, which is still what we require
+# of the raw data. The truncation below is a deliberate, per-draw shortening of
+# that window and must not trip it.
+dt_sel <- truncate_at_breach(dt_sel, srm_breach)
 res_sel <- npv_aggregator(dt_sel, all_names)
 
 # pulse_size & scc (reuse earlier approach but modularized)
@@ -666,6 +831,7 @@ mc_assert_key_set_equal(expected_chunk_keys, unique(scc[, .(ID = as.character(ID
                         c("ID", "gas"), paste0("SCC-with-SRM input chunk ", n_chunk))
 mc_assert_complete_time_window(scc, c("ID", "gas"),
                                paste0("SCC-with-SRM input chunk ", n_chunk))
+scc <- truncate_at_breach(scc, srm_breach)   # same cut point as the npc block
 scc_by <- c("gas", intersect(names(scc), names(id_montecarlo)))
 scc_diag <- make_scc_diagnostics(
   scc,
@@ -676,7 +842,7 @@ scc_diag <- make_scc_diagnostics(
 )
 compute_gwpt(scc)
 scc[, tropoz_pollution := vsl * globaltouspc * (gwpt/gwp) ^ (vsl_eta) * mortality_ozone * (concch4_pulse - concch4_base)]
-scc[, dam := gwpt * pmin(1, alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) ) ]
+scc[, dam := gwpt * ( alpha * (pmax(0,temp_srmpulse)^2 - pmax(0,temp_srm)^2) ) ]
 mc_assert_no_missing(scc, c("tropoz_pollution", "dam"), paste0("SCC-with-SRM computed costs chunk ", n_chunk))
 scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))),
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
@@ -704,12 +870,44 @@ mc_assert_no_missing(scc, c("temp_base", "temp_pulse", "concch4_pulse", "concch4
                             "forc_base", "forc_pulse"),
                      paste0("SCC-no-SRM climate inputs chunk ", n_chunk))
 scc <- merge(scc, id_montecarlo[, c("ID","ecs","tcr","rcp","pulse_time","alpha","delta",
-                                    "mortality_ozone","vsl","vsl_eta","dg",
-                                    "sampler_version","sampling_method","seed",
-                                    "draw_index","term_delay","censored_termination"), with = FALSE],
+                                    "mortality_ozone","vsl","vsl_eta","dg"), with = FALSE],
              by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
 mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
                      paste0("SCC-no-SRM Monte Carlo inputs chunk ", n_chunk))
+# Breach year of the no-SRM world judged by its OWN total damage, computed here while
+# the table still spans the full horizon (the srm-world equivalent is likewise taken
+# before any pulse_time restriction). A draw whose no-SRM world breaches at or before
+# its pulse_time has no economically meaningful window and no definable scc_nosrm, so
+# it is excluded from this block's expected key set rather than emitted as a zero.
+nosrm_breach <- nosrm_first_breach_t(scc, "ID")
+nosrm_breach <- merge(nosrm_breach, pulse_by_id, by = "ID", all.x = TRUE)
+mc_assert_unique_key(nosrm_breach, "ID", paste0("no-SRM breach table chunk ", n_chunk))
+nosrm_empty_ids <- nosrm_breach[!is.na(first_breach_t) & first_breach_t <= pulse_time, unique(ID)]
+expected_nosrm_keys <- expected_chunk_keys[!ID %in% nosrm_empty_ids]
+
+nosrm_trunc_ids <- nosrm_breach[!is.na(first_breach_t) & first_breach_t > pulse_time, unique(ID)]
+# Build the record from expected_chunk_keys, not from `scc`: the id_montecarlo join
+# above pulls in every realization sharing this base scenario, including IDs belonging
+# to other chunks, and only this chunk's keys should be flagged here.
+nosrm_rec <- expected_chunk_keys[ID %in% nosrm_trunc_ids, .(ID, gas)]
+if (nrow(nosrm_rec) > 0L) {
+  nosrm_rec[, reason := "damage_truncated_nosrm"]
+  # expected_chunk_keys carries ID as character, nosrm_breach as numeric -- match on
+  # character so the breach year actually lands instead of merging to all-NA.
+  nosrm_rec <- merge(nosrm_rec,
+                     nosrm_breach[, .(ID = as.character(ID), breach_t = first_breach_t)],
+                     by = "ID", all.x = TRUE)
+  mc_assert_no_missing(nosrm_rec, "breach_t", paste0("no-SRM discard record chunk ", n_chunk))
+  append_discards(nosrm_rec[, .(ID, gas, reason, breach_t)])
+  cat("no-SRM truncation (chunk", n_chunk, "):", uniqueN(nosrm_rec$ID),
+      "draw(s) truncated at their own no-SRM breach year in sccnosrm_output (kept).\n")
+}
+if (length(nosrm_empty_ids) > 0L) {
+  cat("no-SRM filter (chunk", n_chunk, "):", length(nosrm_empty_ids),
+      "draw(s) have no definable scc_nosrm (no-SRM world breaches at/before pulse_time);",
+      "omitted from sccnosrm_output only.\n")
+}
+
 scc <- scc[ t >= as.numeric(pulse_time) ]
 # The no-SRM SCC is keyed only on the base FAIR scenario (ecs/tcr/rcp/pulse_time),
 # so the id_montecarlo join above pulls in every realization sharing that base
@@ -726,6 +924,16 @@ mc_assert_key_set_equal(expected_chunk_keys, unique(scc[, .(ID = as.character(ID
                         c("ID", "gas"), paste0("SCC-no-SRM input chunk ", n_chunk))
 mc_assert_complete_time_window(scc, c("ID", "gas"),
                                paste0("SCC-no-SRM input chunk ", n_chunk))
+# Cut at the no-SRM world's OWN breach year, not the srm world's: this block prices a
+# world with no SAI in it, so the srm world's viability is not the relevant standard.
+# The two cut points genuinely differ -- the no-SRM world is hotter and usually breaches
+# first, but for draws with costly SAI (high mortality_srm / theta) the srm world's
+# deployment and pollution terms tip it over earlier instead.
+# CONSEQUENCE: npc/scc and scc_nosrm are now integrated over different horizons for the
+# same draw, so the per-draw ratios in Figure_2 (npc_srm / scc_nosrm, npc_srm / scc_srm)
+# divide NPVs spanning different windows. That is a deliberate choice -- see the SI note
+# on draw-dependent horizons -- but it is the reason those ratios are not like-for-like.
+scc <- truncate_at_breach(scc, nosrm_breach)
 scc_nosrm_by <- c("gas", intersect(names(scc), names(id_montecarlo)))
 scc_nosrm_diag <- make_scc_diagnostics(
   scc,
@@ -745,7 +953,11 @@ scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time",
 scc_agg2[, scc_nosrm := (damnpv + ozpnpv) / pulse_size]
 mc_assert_no_missing(scc_agg2, c("ID", "gas", "pulse_size", "scc_nosrm"), paste0("SCC-no-SRM output chunk ", n_chunk))
 mc_assert_unique_key(scc_agg2, c("ID", "gas"), paste0("SCC-no-SRM output chunk ", n_chunk))
-mc_assert_key_set_equal(expected_chunk_keys, unique(scc_agg2[, .(ID = as.character(ID), gas = as.character(gas))]),
+# Assert against the narrowed key set: draws whose no-SRM world breaches at or before
+# their pulse_time have no scc_nosrm and are legitimately absent here, while every other
+# draw must still be present. Narrowing the expectation keeps this a strict equality
+# check rather than weakening it to a subset test.
+mc_assert_key_set_equal(expected_nosrm_keys, unique(scc_agg2[, .(ID = as.character(ID), gas = as.character(gas))]),
                         c("ID", "gas"), paste0("SCC-no-SRM output chunk ", n_chunk))
 
 # combine results: a single experiment's NPC, no probability weighting
