@@ -85,7 +85,9 @@ mc_assert_unique_key <- function(x, key_cols, context) {
   if (length(missing_cols) > 0) {
     stop(context, " missing key columns: ", paste(missing_cols, collapse = ", "), call. = FALSE)
   }
-  key_df <- x[key_cols]
+  # Column subset via data.frame semantics so this works for both data.frame and
+  # data.table inputs (DT[<character>] would be a keyed-join, not a column select).
+  key_df <- as.data.frame(x, stringsAsFactors = FALSE)[key_cols]
   dup <- duplicated(key_df) | duplicated(key_df, fromLast = TRUE)
   if (!any(dup)) return(invisible(TRUE))
   details <- paste(utils::capture.output(print(utils::head(key_df[dup, , drop = FALSE], 10))),

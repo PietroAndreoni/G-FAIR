@@ -112,4 +112,33 @@ expect_error(
   "incomplete time windows"
 )
 
+# mc_assert_unique_key must select columns, not trigger a data.table keyed join.
+# Every caller in Analyze_montecarlo.R passes a data.table, so cover that input
+# type for unkeyed, keyed and plain data.frame cases.
+unique_keys_dt <- data.table::data.table(ID = c("1", "2"), gas = c("co2", "ch4"), v = c(1, 2))
+assert_true(mc_assert_unique_key(unique_keys_dt, c("ID", "gas"), "unkeyed data.table fixture"),
+            "unique keys in an unkeyed data.table must pass")
+assert_true(mc_assert_unique_key(unique_keys_dt[, .(ID, v)], "ID", "single-column key fixture"),
+            "a single-column key on a data.table must pass")
+assert_true(mc_assert_unique_key(as.data.frame(unique_keys_dt), c("ID", "gas"), "data.frame fixture"),
+            "unique keys in a data.frame must pass")
+
+duplicate_keys_dt <- data.table::data.table(ID = c("1", "1"), gas = c("co2", "co2"), v = c(1, 2))
+expect_error(
+  mc_assert_unique_key(duplicate_keys_dt, c("ID", "gas"), "duplicate key fixture"),
+  "contains duplicate key rows"
+)
+
+keyed_duplicates_dt <- data.table::copy(duplicate_keys_dt)
+data.table::setkeyv(keyed_duplicates_dt, "ID")
+expect_error(
+  mc_assert_unique_key(keyed_duplicates_dt, c("ID", "gas"), "keyed duplicate fixture"),
+  "contains duplicate key rows"
+)
+
+expect_error(
+  mc_assert_unique_key(unique_keys_dt, c("ID", "nope"), "missing key column fixture"),
+  "missing key columns"
+)
+
 cat("Monte Carlo utility tests passed.\n")
