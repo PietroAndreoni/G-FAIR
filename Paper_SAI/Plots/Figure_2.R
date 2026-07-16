@@ -28,7 +28,7 @@ output_folder <- RESULTS_FOLDER_MAIN
 damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv))
 scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output")), read.csv)) %>% rename(scc=scc_nosrm)
 scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output")), read.csv)) %>% rename(scc_srm=scc)
-all_cols <- names(damnpv)[1:20]
+all_cols <- names(damnpv)[1:21]
 remove_outliers <- FIG_OUTLIER_COLS
 check_densities <- damnpv %>%
   filter(gas=="co2") %>%
@@ -49,8 +49,9 @@ damnpv <- damnpv %>%
 #  inner_join(scc_srm %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
 #  filter(npc_srm>0 ) %>% 
   group_by_at(setdiff(all_cols,c("gas")) ) %>% 
-  filter(n()==2 & !any(duplicated(gas))) %>% 
-  ungroup() %>% unique()
+  filter(n()==2 & !any(duplicated(gas)) & ID<=4096) %>% 
+  ungroup() %>% unique() 
+  
 
 scc %>% 
   select(gas,ecs,tcr,rcp,alpha,delta,vsl,vsl_eta,dg,mortality_ozone,damnpv,pulse_size) %>% 
@@ -73,7 +74,7 @@ fraction <- frac_damages %>% filter(npc_frac!=0  & npc_frac>0) %>%
   facet_wrap(gas~.,) + ggpubr::theme_pubr() +
   xlab("Fraction of total cost") + ylab("Density")
 
-damnorm <- damnpv %>% unique() %>% 
+damnorm <- damnpv %>% unique() %>% select(-ID) %>% 
   mutate(geo_start=ifelse(cool_rate==0,2500,geo_start),
          geo_end =ifelse(cool_rate==0,max(geo_end)+100,geo_end )) %>% 
   mutate_if(is.integer, as.numeric) %>%
@@ -123,24 +124,20 @@ geom_point(aes(x=log10(npc_norm),
 
 library(gsaot)
 gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="ch4") %>% #filter(npc_srm>quantile(npc_srm,0.01)  & npc_srm<quantile(npc_srm,0.99)) %>% 
-  select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-npc_std)
+  select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-npc_std,-term)
 
 stat_analysis_ch4 <- ot_indices_1d(gsoat_data %>% select(-npc_srm, -npc_norm),
                                    log10(gsoat_data %>% pull(npc_norm)), 
-                                   M= GSA_M,
-                                   boot = GSA_BOOT,
-                                   R = GSA_R)
+                                   M= GSA_M)
 lowerbound_ch4 <- irrelevance_threshold(log10(gsoat_data %>% pull(npc_norm)), M= GSA_M, solver="1d")
 
 gsoat_data <- damnorm %>% ungroup() %>% filter(gas=="co2") %>%   
-  select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-npc_std)
+  select(-gas,-pulse_size,-ozpnpv,-srmpnpv,-masknpv,-dirnpv,-damnpv,-npc_std,-term)
 
 stat_analysis_co2 <- ot_indices_1d(gsoat_data %>% 
                                      select(-npc_srm, -npc_norm),
                                    log10(gsoat_data %>% pull(npc_norm)), 
-                                   M= GSA_M,
-                                   boot = GSA_BOOT,
-                                   R = GSA_R)
+                                   M= GSA_M)
 lowerbound_co2 <- irrelevance_threshold(log10(gsoat_data %>% pull(npc_norm)), M= GSA_M, solver="1d")
 
 input_categories <- c("ecs"="Climate",
@@ -189,12 +186,13 @@ importance_ch4 <- ggplot( ) +
                y=original,
                fill=input_categories[input]),stat="identity",color="black") + 
   geom_hline(yintercept=lowerbound_ch4$indices) +
-  geom_errorbar(data=as_tibble(stat_analysis_ch4$indices_ci),
-                aes(x=reorder(input, -original),
-                    ymin=low.ci,
-                    ymax=high.ci),stat="identity",position="dodge",color="black") +
+  # geom_errorbar(data=as_tibble(stat_analysis_ch4$indices_ci),
+  #               aes(x=reorder(input, -original),
+  #                   ymin=low.ci,
+  #                   ymax=high.ci),stat="identity",position="dodge",color="black") +
   ylab(expression("importance [" * log[10](CH[4]) * "]")) + xlab("") + 
   theme(legend.position = "top") + scale_fill_viridis_d(name="") +
+  ylim(c(0,0.175)) +
   scale_x_discrete(guide = guide_axis(n.dodge = 2),
                    labels = function(x) parse(text = unname(input_axis_labels[x]))) +
   ggpubr::theme_pubr()
@@ -205,12 +203,13 @@ importance_co2 <- ggplot( ) +
                 y=original,
                 fill=input_categories[input]),stat="identity",color="black") + 
   geom_hline(yintercept=lowerbound_co2$indices) +
-  geom_errorbar(data=as_tibble(stat_analysis_co2$indices_ci),
-                aes(x=reorder(input, -original),
-                    ymin=low.ci,
-                    ymax=high.ci),stat="identity",position="dodge",color="black") +
+  # geom_errorbar(data=as_tibble(stat_analysis_co2$indices_ci),
+  #               aes(x=reorder(input, -original),
+  #                   ymin=low.ci,
+  #                   ymax=high.ci),stat="identity",position="dodge",color="black") +
   ylab(expression("importance [" * log[10](CO[2]) * "]")) + xlab("") + 
   theme(legend.position = "top") + scale_fill_viridis_d(name="") +
+  ylim(c(0,0.175)) +
   scale_x_discrete(guide = guide_axis(n.dodge = 2),
                    labels = function(x) parse(text = unname(input_axis_labels[x]))) +
   ggpubr::theme_pubr()
@@ -220,16 +219,15 @@ importances <- (importance_co2+importance_ch4)+
   plot_layout(guides = "collect") & theme(legend.position = 'bottom')
 
 gsoat_data <- damnorm %>% ungroup() %>% 
-  group_by_at(setdiff(all_cols,c("gas","npc_norm")) ) %>%  
-  summarise(diff=log10(npc_norm[gas=="co2"])-log10(npc_norm[gas=="ch4"]) ) %>% ungroup()
+  group_by_at(setdiff(all_cols,c("gas","npc_norm","ID")) ) %>%  
+  summarise(diff=log10(npc_norm[gas=="co2"])-log10(npc_norm[gas=="ch4"]) ) %>% ungroup() %>% 
+  select(-term) 
 #  summarise(diff=npc_norm[gas=="co2"]-npc_norm[gas=="ch4"] ) %>% ungroup()
 
 stat_analysis_diff <- ot_indices_1d(gsoat_data %>% 
                                       select(-diff),
                                     gsoat_data %>% pull(diff), 
-                                    M= GSA_M,
-                                    boot = GSA_BOOT,
-                                    R = GSA_R)
+                                    M= GSA_M)
 lowerbound_diff <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, solver="1d")
 
 # CHECK 
@@ -242,20 +240,19 @@ lowerbound_diff <- irrelevance_threshold(gsoat_data %>% pull(diff), M= GSA_M, so
 #  }
 
 hist(gsoat_data %>% pull(diff))
-ggplot(data) +
-  geom_point(aes(x=sample,y=irr))
+#ggplot(data) + geom_point(aes(x=sample,y=irr))
 
 importance_diff <- ggplot() + 
   geom_bar(data=tibble("input"=names(stat_analysis_diff$indices),
                        "original"=stat_analysis_diff$indices), aes(x=reorder(input, -original),
                                                                    y=original,
                                                                    fill=input_categories[input]),stat="identity",color="black") + 
-#  geom_hline(yintercept=lowerbound_diff$indices) +
-  geom_errorbar(data=as_tibble(stat_analysis_diff$indices_ci),
-                aes(x=reorder(input, -original),
-                    ymin=low.ci,
-                    ymax=high.ci),
-                stat="identity",position="dodge",color="black") +
+  geom_hline(yintercept=lowerbound_diff$indices) +
+  # geom_errorbar(data=as_tibble(stat_analysis_diff$indices_ci),
+  #               aes(x=reorder(input, -original),
+  #                   ymin=low.ci,
+  #                   ymax=high.ci),
+  #               stat="identity",position="dodge",color="black") +
   ylab(expression("importance [" * log[10](CH[4]) - log[10](CO[2]) * "]")) + xlab("") + 
   theme(legend.position = "top") + scale_fill_viridis_d(name="") +
   scale_x_discrete(labels = function(x) parse(text = unname(input_axis_labels[x]))) +
@@ -295,12 +292,12 @@ theta <- ggplot(damnorm) +
   ggpubr::theme_pubr(legend="none")
 
 term <- ggplot(damnorm) +
-  geom_smooth(aes(x=FIG2_TERM_YEAR_BASE+term,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=prob,y=log10(npc_norm),color=gas),
               method="loess") +
   scale_y_continuous(labels = pow10_labels) +
+  scale_x_log10() +
   xlab("Year of termination") + ylab("") +
-  coord_cartesian(xlim = FIG2_TERM_XLIM,
-                  ylim = c(-0.5,1) ) +
+  coord_cartesian(ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
 ecs <- ggplot(damnorm) +
@@ -314,12 +311,12 @@ ecs <- ggplot(damnorm) +
                   ylim = c(-0.5,1)) + ggpubr::theme_pubr(legend="none")
 
 void <- ggplot() + theme_void()
-fig2 <- (void + density_plot + void + plot_layout(widths = c(0.2,1,0.2)) ) / (dr + theta) / (ecs + alpha) + plot_layout(heights=c(1,0.6,0.6))
+fig2 <- (void + density_plot + void + plot_layout(widths = c(0.2,1,0.2)) ) / (dr + term) / (theta + alpha) + plot_layout(heights=c(1,0.6,0.6))
 
 save_figure("fig_2.png",fig2,width=12,height=12,dpi=300)
 save_figure("extfig_gsa.png",importances,width=12,height=6,dpi=300)
 save_figure("extfig_gsadiff.png",importance_diff,width=11,height=6,dpi=300)
-save_figure("extfig_fra.png",fraction,width=12,height=6,dpi=300)
+#save_figure("extfig_fra.png",fraction,width=12,height=6,dpi=300)
 
 if (FALSE) {
   damnorm %>% filter(gas=="co2" & scc<100) %>%

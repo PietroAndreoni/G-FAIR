@@ -37,7 +37,7 @@ output_folder <- RESULTS_FOLDER_FIG3
 damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv)) 
 scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output")), read.csv)) %>% rename(scc=scc_nosrm)
 scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output")), read.csv)) %>% rename(scc_srm=scc)
-all_cols <- names(damnpv)[1:20]
+all_cols <- names(damnpv)[1:21]
 remove_outliers <- FIG_OUTLIER_COLS
 check_densities <- damnpv %>%
   filter(gas=="ch4") %>%
@@ -52,7 +52,7 @@ check_densities %>%
 
 # filter scc and npc>0 and scenarios with both CH4 and CO2
 damnpv <- damnpv %>% 
-  inner_join(check_densities) %>% 
+#  inner_join(check_densities) %>% 
 #  inner_join(scc %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
 #  inner_join(scc_srm %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
   filter(npc_srm>0) %>% 
