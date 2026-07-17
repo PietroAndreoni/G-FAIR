@@ -115,10 +115,9 @@ fig3 <- ggplot() +
   ylab("Emission reductions (% of baseline)\nDensity (% per $100/ton)") + 
   theme(legend.position = "none") + 
   coord_cartesian(xlim=FIG3_XLIM,ylim=FIG3_YLIM) +
-  scale_x_continuous(labels = ~paste(., ./CH4_GWP100, ./CH4_GWP100/C_PER_CO2,sep = "\n"),
+  scale_x_continuous(labels = ~paste(., ./CH4_GWP100, sep = "\n"),
                      name = expression(atop("Abatement cost ($/ton" * CH[4] * ")",
-                                            "Abatement cost ($/ton" * CO[2] * "eq)",
-                                            "Abatement cost ($/tonCeq)"))) #+ facet_wrap(year~.,)
+                                            "Abatement cost ($/ton" * CO[2] * "eq)"))) #+ facet_wrap(year~.,)
 save_figure("fig_3.png",fig3,width=12,height=6,dpi=300)
 
 frac_damages <- damnpv %>% 

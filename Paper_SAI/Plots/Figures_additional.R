@@ -31,7 +31,7 @@ output_folder <- RESULTS_FOLDER_MAIN
 damnpv <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "npc_output")), read.csv))
 scc <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "sccnosrm_output")), read.csv)) %>% rename(scc=scc_nosrm)
 scc_srm <- bind_rows(lapply(file.path(output_folder,list.files(path = output_folder, pattern = "scc_output")), read.csv)) %>% rename(scc_srm=scc)
-all_cols <- names(damnpv)[1:20]
+all_cols <- names(damnpv)[1:21]
 remove_outliers <- FIG_OUTLIER_COLS
 check_densities <- damnpv %>%
   filter(gas=="co2") %>%
@@ -47,7 +47,7 @@ check_densities %>%
   
 # filter scc and npc>0 and scenarios with both CH4 and CO2
 damnpv <- damnpv %>% 
-  inner_join(check_densities) %>% 
+#  inner_join(check_densities) %>% 
 #  inner_join(scc %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
 #  inner_join(scc_srm %>% select(-damnpv,-ozpnpv,-pulse_time)) %>% 
   filter(npc_srm>0 ) %>% 
@@ -64,14 +64,38 @@ damnorm <- damnpv %>% unique() %>%
          npc_norm=npc_srm/median(npc_srm,na.rm=TRUE))
 
 
-tail_inputs <- tibble::tribble(
-  ~input, ~label, ~column,
-  "discount", "Discount", "discount",
-  "sai_angle", "SAI angle", "sai_angle",
-  "ecs_k", "ECS", "ecs_k",
-  "damage_alpha", "Damages", "damage_alpha",
-  "termination_year", "Term. year", "termination_year"
+# Inputs the tail matrices can draw, keyed by `param` -- the sampled parameter
+# name selected in FIG2_MATRIX_INPUTS (all_parameters.R). `column` is the derived
+# plotting column built in tail_data above. `dist` is the sampling distribution,
+# which sets how the diagonal marginal is drawn (and whether it is trimmed), to
+# match the corresponding Figure_2.R input panel:
+#   uniform    -> discrete bar chart (no quantile trim)
+#   loguniform -> density on a log10 x-axis (no quantile trim)
+#   other      -> density trimmed to the FIG2_PANEL_QLO..QHI quantile range
+tail_input_catalog <- tibble::tribble(
+  ~param,            ~input,            ~label,            ~column,           ~dist,
+  "delta",           "discount",        "Discount",        "discount",        "uniform",
+  "theta",           "sai_angle",       "SAI angle",       "sai_angle",       "other",
+  "ecs",             "ecs_k",           "ECS",             "ecs_k",           "other",
+  "alpha",           "damage_alpha",    "Damages",         "damage_alpha",    "other",
+  "mortality_ozone", "ozone_mortality", "Ozone mortality", "ozone_mortality", "other",
+  "dg",              "growth_g",        "Growth g",        "growth_g",        "other",
+  "pulse_time",      "pulse_year",      "Pulse year",      "pulse_year",      "uniform",
+  "prob",            "term_prob",       "Term. prob.",     "term_prob",       "loguniform"
 )
+
+unknown_matrix_inputs <- setdiff(FIG2_MATRIX_INPUTS, tail_input_catalog$param)
+if (length(unknown_matrix_inputs) > 0) {
+  stop("FIG2_MATRIX_INPUTS has no tail_input_catalog entry for: ",
+       paste(unknown_matrix_inputs, collapse = ", "), ". Available: ",
+       paste(tail_input_catalog$param, collapse = ", "), call. = FALSE)
+}
+
+# Selected inputs, in the order given by FIG2_MATRIX_INPUTS.
+tail_inputs <- tail_input_catalog %>%
+  filter(param %in% FIG2_MATRIX_INPUTS) %>%
+  arrange(match(param, FIG2_MATRIX_INPUTS)) %>%
+  select(input, label, column, dist)
 
 density_tail_inputs <- tibble::tribble(
   ~gas, ~input, ~label, ~column,
@@ -119,13 +143,14 @@ bin_tail_input <- function(x, max_bins = 5) {
 
 tail_data <- damnorm %>%
   ungroup() %>%
-  mutate(discount = delta * FIG2_DELTA_PCT,
-         sai_angle = theta,
-         ecs_k = ecs / FIG2_ECS_TENTHS,
-         damage_alpha = alpha * FIG2_ALPHA_PCT,
-         termination_year = FIG2_TERM_YEAR_BASE + term,
+  mutate(discount = delta * 100,           # [%]
+         sai_angle = theta,                # [deg]
+         ecs_k = ecs / 10,                 # [K] (kept for the density-overlay figure)
+         damage_alpha = alpha * 100,       # [%GDP/K^2]
+         growth_g = dg * 100,              # annual GDP growth rate [%]
+         term_prob = prob,                 # per-year termination hazard
          ozone_mortality = mortality_ozone,
-         pulse_year = FIG2_TERM_YEAR_BASE + pulse_time,
+         pulse_year = 2020 + pulse_time,   # calendar year
          vsl_m = vsl / 1e6) %>%
   group_by(gas) %>%
   mutate(bad_tail = npc_norm >= quantile(npc_norm, FIG2_TAIL_QUANTILE, na.rm = TRUE)) %>%
@@ -136,10 +161,34 @@ tail_input_labels <- tail_inputs$label
 names(tail_input_labels) <- tail_inputs$input
 tail_input_columns <- tail_inputs$column
 names(tail_input_columns) <- tail_inputs$input
+tail_input_dist <- setNames(tail_inputs$dist, tail_inputs$input)
 tail_input_labels[density_tail_inputs$input] <- density_tail_inputs$label
 tail_input_columns[density_tail_inputs$input] <- density_tail_inputs$column
 density_tail_input_order <- unique(density_tail_inputs$input)
 tail_definition_order <- unique(c(tail_input_order, density_tail_input_order))
+
+# FIG2_PANEL_QLO..QHI trim thresholds per input, computed once over the pooled
+# data (both gases) so the diagonal density, the heatmap shares/means, and the
+# bin brackets are all built from the SAME cut distribution. Uniform (discount)
+# and log-uniform (term prob) inputs are left untrimmed (NULL). Same trimming
+# quantiles (from all_parameters.R) as the per-panel clipping in Figure_2.R.
+tail_input_trim <- setNames(lapply(tail_input_order, function(input_name) {
+  if (identical(tail_input_dist[[input_name]], "other")) {
+    unname(quantile(tail_data[[tail_input_columns[[input_name]]]],
+                    c(FIG2_PANEL_QLO, FIG2_PANEL_QHI), na.rm = TRUE))
+  } else {
+    NULL
+  }
+}), tail_input_order)
+
+# Trim one input's values to its stored range, marking out-of-range entries NA so
+# they drop out of the bins, the heatmap aggregation, and the diagonal density
+# alike. Untrimmed inputs (NULL limits) pass through unchanged.
+cut_input_values <- function(input_name, values) {
+  lims <- tail_input_trim[[input_name]]
+  if (!is.null(lims)) values[values < lims[[1]] | values > lims[[2]]] <- NA
+  values
+}
 
 tail_condition_quantile <- 0.25
 
@@ -632,8 +681,9 @@ tail_offdiag <- purrr::pmap_dfr(tail_pair_index,
   tail_data %>%
     filter(gas == gas_value) %>%
     transmute(bad_tail,
-              x_bin = bin_tail_input(.data[[tail_input_columns[[col_input]]]]),
-              y_bin = bin_tail_input(.data[[tail_input_columns[[row_input]]]])) %>%
+              x_bin = bin_tail_input(cut_input_values(col_input, .data[[tail_input_columns[[col_input]]]])),
+              y_bin = bin_tail_input(cut_input_values(row_input, .data[[tail_input_columns[[row_input]]]]))) %>%
+    filter(!is.na(x_bin), !is.na(y_bin)) %>%
     group_by(x_bin, y_bin) %>%
     summarise(tail_share = mean(bad_tail, na.rm = TRUE),
               n = n(),
@@ -690,12 +740,36 @@ make_tail_heatmap_cell <- function(row_input, col_input, row_id, col_id) {
           axis.ticks.y = if (col_id == 1) element_line() else element_blank())
 }
 
+# Diagonal marginal for one input. The layer + x-axis mirror the matching
+# Figure_2.R input panel (see `dist` in tail_inputs): uniform inputs get a
+# discrete bar chart, log-uniform inputs a density on a log10 x-axis, and every
+# other input a density trimmed to the FIG2_PANEL_QLO..QHI quantile range (the
+# same coord_cartesian trim, with the same parameters, that Figure_2.R applies).
 make_tail_density_cell <- function(input_name, cell_id) {
   input_values <- tail_density_data[[tail_input_columns[[input_name]]]]
+  input_dist <- tail_input_dist[[input_name]]
 
-  ggplot(tibble(value = input_values), aes(x = value)) +
-    geom_density(fill = "grey75", color = "grey25", linewidth = 0.35, alpha = 0.9,
-                 adjust = 1) +
+  marginal_layers <- if (identical(input_dist, "uniform")) {
+    # Discrete uniform: one bar per value. Drop the per-bar outline when there are
+    # many bars (e.g. pulse year) so they don't merge into a solid dark block.
+    bar_color <- if (length(unique(input_values[!is.na(input_values)])) > 15) NA else "grey25"
+    list(geom_bar(data = tibble(value = factor(round(input_values, 6))),
+                  aes(x = value),
+                  fill = "grey75", color = bar_color, linewidth = 0.35, alpha = 0.9))
+  } else if (identical(input_dist, "loguniform")) {
+    list(geom_density(data = tibble(value = log10(input_values)), aes(x = value),
+                      fill = "grey75", color = "grey25", linewidth = 0.35,
+                      alpha = 0.9, adjust = 1),
+         scale_x_continuous(labels = pow10_labels))
+  } else {
+    trimmed <- cut_input_values(input_name, input_values)
+    list(geom_density(data = tibble(value = trimmed[!is.na(trimmed)]), aes(x = value),
+                      fill = "grey75", color = "grey25", linewidth = 0.35,
+                      alpha = 0.9, adjust = 1))
+  }
+
+  ggplot() +
+    marginal_layers +
     labs(title = ifelse(cell_id == 1, tail_input_labels[[input_name]], ""),
          y = ifelse(cell_id == 1, tail_input_labels[[input_name]], "")) +
     tail_cell_theme +
@@ -732,5 +806,10 @@ tail_contrast_matrix <- patchwork::wrap_plots(tail_matrix_cells,
         plot.title = element_text(face = "bold"),
         plot.subtitle = element_text(size = 9))
 
-save_figure("fig_2_tail_contrast_matrix.png",tail_contrast_matrix,width=12,height=11,dpi=300)
+# Matrix canvas scales with the number of selected inputs (12x11 at 5 inputs).
+matrix_fig_width  <- 2 + 2 * length(tail_input_order)
+matrix_fig_height <- 1 + 2 * length(tail_input_order)
+
+save_figure("fig_2_tail_contrast_matrix.png",tail_contrast_matrix,
+            width=matrix_fig_width,height=matrix_fig_height,dpi=300)
 save_figure("fig_2_tail_density_overlay.png",tail_bad_density_plot,width=16,height=9,dpi=300)
