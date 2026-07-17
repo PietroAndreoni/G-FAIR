@@ -99,6 +99,15 @@ scc %>%
             p95 = quantile(scc,0.95,na.rm=TRUE),
             npc_med = median(scc,na.rm=TRUE))
 
+scc_srm %>% 
+  filter(delta==0.02) %>% 
+  group_by(gas) %>% 
+  summarise(npc_mad = mad(scc_srm,na.rm=TRUE), 
+            p25 = quantile(scc_srm,0.25,na.rm=TRUE), 
+            p75 = quantile(scc_srm,0.75,na.rm=TRUE),
+            p95 = quantile(scc_srm,0.95,na.rm=TRUE),
+            npc_med = median(scc_srm,na.rm=TRUE))
+
 stats::ks.test(damnorm %>% filter(gas=="co2") %>% pull(npc_std),
                damnorm %>% filter(gas=="ch4") %>% pull(npc_std))
 
@@ -263,20 +272,20 @@ damnorm %>%
   geom_abline(slope=1,intercept=0)+ ggpubr::theme_pubr()
 
 dr <- ggplot(damnorm) +
-  geom_smooth(aes(x=delta*FIG2_DELTA_PCT,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=delta*100,y=log10(npc_norm),color=gas),
               method="loess") +
   scale_y_continuous(labels = pow10_labels) +
   xlab("Discount rate [%]") + ylab("Normalized cost") +
   coord_cartesian(ylim = c(-0.5,1) ) + ggpubr::theme_pubr(legend="none")
 
 alpha <- ggplot(damnorm) +
-  geom_smooth(aes(x=alpha*FIG2_ALPHA_PCT,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=alpha*100,y=log10(npc_norm),color=gas),
               method="loess") +
 #  geom_density(aes(x=alpha*100,y=after_stat(scaled))) +
   scale_y_continuous(labels = pow10_labels) +
   xlab(expression("Climate damages [%GDP " * K^-2 * "]")) + ylab("") +
-  coord_cartesian(xlim = c(quantile(damnorm$alpha*FIG2_ALPHA_PCT, FIG2_PANEL_QLO, na.rm=TRUE),
-                           quantile(damnorm$alpha*FIG2_ALPHA_PCT, FIG2_PANEL_QHI, na.rm=TRUE)),
+  coord_cartesian(xlim = c(quantile(damnorm$alpha*100, FIG2_PANEL_QLO, na.rm=TRUE),
+                           quantile(damnorm$alpha*100, FIG2_PANEL_QHI, na.rm=TRUE)),
                   ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
@@ -292,22 +301,22 @@ theta <- ggplot(damnorm) +
   ggpubr::theme_pubr(legend="none")
 
 term <- ggplot(damnorm) +
-  geom_smooth(aes(x=prob,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=log10(prob),y=log10(npc_norm),color=gas),
               method="loess") +
   scale_y_continuous(labels = pow10_labels) +
-  scale_x_log10() +
+  scale_x_continuous(labels = pow10_labels) +
   xlab("Year of termination") + ylab("") +
   coord_cartesian(ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
 ecs <- ggplot(damnorm) +
-  geom_smooth(aes(x=ecs/FIG2_ECS_TENTHS,y=log10(npc_norm),color=gas),
+  geom_smooth(aes(x=ecs/10,y=log10(npc_norm),color=gas),
               method="loess") +
 #  geom_density(aes(x=ecs/10,y=after_stat(scaled))) +
   scale_y_continuous(labels = pow10_labels) +
   xlab("Climate equilibrium sensitivity [K]") + ylab("") +
-  coord_cartesian(xlim = c(quantile(damnorm$ecs/FIG2_ECS_TENTHS, FIG2_PANEL_QLO, na.rm=TRUE),
-                           quantile(damnorm$ecs/FIG2_ECS_TENTHS, FIG2_PANEL_QHI, na.rm=TRUE)),
+  coord_cartesian(xlim = c(quantile(damnorm$ecs/10, FIG2_PANEL_QLO, na.rm=TRUE),
+                           quantile(damnorm$ecs/10, FIG2_PANEL_QHI, na.rm=TRUE)),
                   ylim = c(-0.5,1)) + ggpubr::theme_pubr(legend="none")
 
 void <- ggplot() + theme_void()

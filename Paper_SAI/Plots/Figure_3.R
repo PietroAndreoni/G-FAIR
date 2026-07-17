@@ -61,7 +61,27 @@ damnpv <- damnpv %>%
 damnpv %>% 
   group_by(pulse_time) %>% 
   summarise(med=median(npc_srm),
-            p95=quantile(npc_srm,.95))
+            p95=quantile(npc_srm,.95),
+            p99=quantile(npc_srm,.99))
+
+
+scc %>% 
+  filter(delta==0.02) %>% 
+  group_by(gas) %>% 
+  summarise(npc_mad = mad(scc,na.rm=TRUE), 
+            p25 = quantile(scc,0.25,na.rm=TRUE), 
+            p75 = quantile(scc,0.75,na.rm=TRUE),
+            p95 = quantile(scc,0.95,na.rm=TRUE),
+            npc_med = median(scc,na.rm=TRUE))
+
+scc_srm %>% 
+  filter(delta==0.02) %>% 
+  group_by(gas) %>% 
+  summarise(npc_mad = mad(scc_srm,na.rm=TRUE), 
+            p25 = quantile(scc_srm,0.25,na.rm=TRUE), 
+            p75 = quantile(scc_srm,0.75,na.rm=TRUE),
+            p95 = quantile(scc_srm,0.95,na.rm=TRUE),
+            npc_med = median(scc_srm,na.rm=TRUE))
 
 # enerdata co2 (provided in 2015 $/tonCO2)
 macc_co2 <- read_parquet(MACC_CO2_FILE) %>%
@@ -115,10 +135,9 @@ fig3 <- ggplot() +
   ylab("Emission reductions (% of baseline)\nDensity (% per $100/ton)") + 
   theme(legend.position = "none") + 
   coord_cartesian(xlim=FIG3_XLIM,ylim=FIG3_YLIM) +
-  scale_x_continuous(labels = ~paste(., ./CH4_GWP100, ./CH4_GWP100/C_PER_CO2,sep = "\n"),
+  scale_x_continuous(labels = ~paste(., ./CH4_GWP100, sep = "\n"),
                      name = expression(atop("Abatement cost ($/ton" * CH[4] * ")",
-                                            "Abatement cost ($/ton" * CO[2] * "eq)",
-                                            "Abatement cost ($/tonCeq)"))) #+ facet_wrap(year~.,)
+                                            "Abatement cost ($/ton" * CO[2] * "eq)"))) #+ facet_wrap(year~.,)
 save_figure("fig_3.png",fig3,width=12,height=6,dpi=300)
 
 frac_damages <- damnpv %>% 

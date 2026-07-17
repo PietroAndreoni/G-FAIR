@@ -399,11 +399,19 @@ HARMSEN_MACC_FIG3_SI     <- file.path(INPUT_DATA_DIR, "harmsen_nonco2_macc.parqu
 MACC_CO2_FILE            <- file.path(INPUT_DATA_DIR, "macc_ed_full_2022.lz4.parquet")
 
 # Figure_2 sensitivity-panel axis transforms / limits (documented, not all wired):
-FIG2_TERM_YEAR_BASE <- 2020      # x = 2020 + term  (termination calendar year)
-FIG2_TERM_XLIM      <- c(2020, 2400)
-FIG2_DELTA_PCT      <- 100       # delta plotted as delta*100 [%]
-FIG2_ALPHA_PCT      <- 100       # alpha plotted as alpha*100 [%GDP/K^2]
-FIG2_ECS_TENTHS     <- 10        # ecs plotted as ecs/10 [K]
-FIG2_PANEL_QLO      <- 0.05      # per-panel x-axis trimming quantiles
-FIG2_PANEL_QHI      <- 0.95
+FIG2_PANEL_QLO      <- 0.025      # per-panel x-axis trimming quantiles
+FIG2_PANEL_QHI      <- 0.975
 FIG2_TAIL_QUANTILE  <- 0.95      # "bad tail" threshold for the contrast matrix
+
+# Sampled inputs shown in the fig_2 tail contrast / mean-damnorm matrices, in
+# plot order. Names are the sampled parameter columns (same naming as Figure_2.R's
+# input_categories); Figures_additional.R maps each to its label, derived plotting
+# column, and sampling distribution via tail_input_catalog.
+# Available: delta, theta, ecs, alpha, mortality_ozone, dg, pulse_time, prob.
+# Keep a log-uniform/few-valued input last: only the bottom-right diagonal cell
+# draws a raw x-axis, so a many-valued one there crowds the labels.
+FIG2_MATRIX_INPUTS  <- c("delta", "alpha", "theta", "prob")
+
+# Single alpha scale shared by CH4 and CO2, capped so mean damnorm >= 10 renders
+# at the darkest shade (higher values are squished to the cap, not dropped).
+mean_alpha_limits <- c(0, 10)
