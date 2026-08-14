@@ -38,10 +38,10 @@ a0 = 0.00575;
 b0 = 2.0;
 srm_angle = 10;
 tgtoforc = 0.25 * Tecs;
-vsl0 = 1e-6;
+vsl0 = 1e-5;
 eta_vsl = 1;
 mort_srm = 7e3;
-csrm = 1e-3;
+csrm = 1e-2;
 eff_decline_srm = 0.01;
 
 pop('1') = 7.0; 
