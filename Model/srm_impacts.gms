@@ -64,20 +64,20 @@ EQUATIONS
 eq_impactcc
 eq_totforcghg
 eq_impactsrm
-eq_srmeff
+eq_effsrm
 eq_qsrm
 eq_mortsrm
 eq_costsrm
 eq_damtot;
 
-eq_impactcc(t)..           DAMFRAC_TEMP(t) =E= a0 * power(TATM(t), b0) - a0 * power(TATM('1'), b0);
+eq_impactcc(t)..           DAMFRAC_TEMP(t) =E= a0 * power( TATM(t), b0);
 
-eq_impactsrm(t)..          DAMFRAC_SRM(t) =E= a0 * power(TATM_GHG(t), b0) * EFF_SRM(t) - a0 * power(TATM(t), b0);
+eq_totforcghg(t)..         TOT_FORC(t) =E= delta + ( sum(cghg, FORCING(cghg,t) )
+                                                    + sqrt( sqr( sum(cghg, FORCING(cghg,t) ) ) + sqr(delta) ) ) / 2;
 
-eq_totforcghg(t)..         TOT_FORC(t) =E= delta + ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t)
-                                                    + sqrt( sqr( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) + sqr(delta) ) ) / 2;
+eq_effsrm(t)..             EFF_SRM(t) =E= 1 - (power( Tecs/forc2x * TOT_FORC(t), b0) * (1 + sqr( FORC_SRM(t) / TOT_FORC(t) ) - 2 * ( FORC_SRM(t) / TOT_FORC(t)) * cos( srm_angle * 3.14159 / 180 ) ) - power( Tecs/forc2x * (TOT_FORC(t) - FORC_SRM(t)), b0) ) / power( Tecs/forc2x * TOT_FORC(t), b0);
 
-eq_srmeff(t)..             EFF_SRM(t) =E= 1 + sqr( FORC_SRM(t) / TOT_FORC(t) ) - 2 * ( FORC_SRM(t) / TOT_FORC(t)) * cos( srm_angle * 180/3.14159 );
+eq_impactsrm(t)..          DAMFRAC_SRM(t) =E= a0 * power( TATM_GHG(t), b0) * (1 - EFF_SRM(t)) - a0 * power( TATM(t), b0);
 
 eq_qsrm(t)..               Q_SRM(t) =E= ( background_srm(t) + SRM(t) ) / ( tgtoforc * (1 - eff_decline_srm *  Q_SRM(t) ) );
 
