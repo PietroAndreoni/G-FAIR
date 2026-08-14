@@ -21,6 +21,9 @@ RES.fx(box,tfirst) = 0; #emshare(box) * ( W_EMI.l('co2',tfirst) * CO2toC ) * emi
 TATM.FX(tfirst) = 0;
 TSLOW.fx(tfirst) = 0;
 TFAST.fx(tfirst) = 0;
+TSLOW_GHG.fx(tfirst) = 0;
+TFAST_GHG.fx(tfirst) = 0;
+FORC_SRM.fx(tfirst) = 0;
 IRF.fx(tfirst) = irf_preindustrial;
 
 W_EMI.fx(ghg,t)$(not active(ghg)) = 0;

@@ -75,7 +75,8 @@ SCALARS
         catm_preindustrial          "Equilibrium concentration atmosphere  (GtCO2)"            
         tslow0          "Initial temperature box 1 change in 2020 (K from 1765)"  /0.1477  /
         tfast0          "Initial temperature box 2 change in 2020 (K from 1765)"  /1.099454/
-        tatm0           "Initial atmospheric temperature change in 2020"          /1.24715 /;
+        tatm0           "Initial atmospheric temperature change in 2020"          /1.24715 /
+        tausrm         "SRM aerosol lifetime (year)" /1.5/;
  
 PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"  
                    taubox(box)    "Decay time constant for reservoir *  (year)"
@@ -84,7 +85,7 @@ PARAMETERS         emshare(box) "Carbon emissions share into Reservoir i"
                    natural_emissions(ghg,t) "Emissions from natural sources for non co2 gasses"
                    wemi_pre(pre,t)          "Emissions of precursor gases"
                    forcing_exogenous(t) "Exogenous forcing from natural sources and exogenous oghgs [W/m2]"
-                   forcing_srm(t) "Exogenous forcing from solar radiation management [W/m2]"
+                   background_srm(t) "Exogenous forcing from solar radiation management [W/m2]"
                    target_temp(t) "Target temperature";
 
 PARAMETER ghg_mm(*) "Molecular mass of greenhouse gases (kg mol-1)";
@@ -109,13 +110,17 @@ VARIABLES
         RES(box,t)     "Carbon concentration in Reservoir i (GtC from 1765)"
         TATM(t)        "Increase temperature of atmosphere (degrees L from 1765)"     
         TSLOW(t)       "Increase temperature from slow response (degrees K from 1765)"
-        TFAST(t)       "Increase temperature from fast response (degrees K from 1765)"
+        TFAST(t)       "Increase temperature from fast response (degrees K from 1765)"      
+        TSLOW_GHG(t)   "Slow temperature response to GHG forcing"
+        TFAST_GHG(t)   "Fast temperature response to GHG forcing"
+        TATM_GHG(t)    "Total temperature response to GHG forcing"
+        FORC_SRM(t)    "Total forcing masked with solar radiation management (W/m2)"
         CUMEMI(t)      "Total co2 emitted (GtC from 1765)"
         C_SINKS(t)     "Accumulated carbon in ocean and other sinks (GtC)"
         C_ATM(t)       "Accumulated carbon in atmoshpere (GtC)"
         IRF(t)         "IRF100 at time t"
         ALPHA(t)       "Carbon decay time scaling factor"
-        SRM(t)         "Forcing masked with solar radiation management (W/m2)"
+        SRM(t)         "Endogenous component of forcing masked with solar radiation management (W/m2)"
         OBJ;
 
 VARIABLES QSLOW, QFAST;
@@ -136,9 +141,13 @@ EQUATIONS
         eq_forcco2          "CO2 forcing equation"
         eq_forcch4          "CH4 forcing equation"
         eq_forcn20          "N2O forcing equation"
-        eq_forch2o
-        eq_forco3trop
+        eq_forch2o          "H2O forcing equation"
+        eq_forco3trop       "tropospheric O3 forcing equation"
         eq_forcoghg         "Other GHG forcing equation"
+        eq_forcsrm
+        eq_tslowghg         "Slow temperature response to GHG forcing"
+        eq_tfastghg         "Fast temperature response to GHG forcing"
+        eq_tatmghg          "Total temperature response to GHG forcing"
         eq_tatm             "Temperature-climate equation for atmosphere"
         eq_tslow            "Temperature box 1 law of motion"
         eq_tfast            "Temperature box 2 law of motion"
@@ -150,8 +159,8 @@ EQUATIONS
 $batinclude "Model/parameters.gms"
 
 ** Four box model for CO2 emission-to-concentrations (FAIR formulation)
-eq_reslom(box,t+1)$(active('co2'))..   RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
-                                        emshare(box) * ( W_EMI('co2',t+1) + OXI_CH4(t+1) ) * emitoconc('co2') * tstep;
+eq_reslom(box,t+1)$(active('co2'))..       RES(box,t+1) =E= RES(box,t) * exp( - tstep / ( taubox(box) * ALPHA(t) ) ) +
+                                            emshare(box) * ( W_EMI('co2',t+1) + OXI_CH4(t+1) ) * emitoconc('co2') * tstep;
 
 eq_concco2(t)$(active('co2'))..            CONC('co2',t) =E=  conc_preindustrial('co2') + sum(box, RES(box,t) );
 
@@ -195,21 +204,31 @@ eq_forco3trop(t)..      FORCING('o3trop',t) =E= 1.74e-4 * (CONC('ch4',t) - conc_
 ** forcing for other well-mixed greenhouse gases (F-gases, SOx, BC, OC, NH3, CO, NMVOC, NOx)  
 eq_forcoghg(oghg,t)$(active(oghg))..     FORCING(oghg,t) =E=  (CONC(oghg,t) - conc_preindustrial(oghg)) * forcing_coeff(oghg);
 
+** forcing dynamic considering SRM aerosol lifetime
+eq_forcsrm(t+1)..                        FORC_SRM(t+1) =E=  FORC_SRM(t) * exp(-tstep/tausrm) + background_srm(t+1) + SRM(t+1);
+
+** forcing to temperature, excluding SRM forcing
+eq_tslowghg(t+1)..                       TSLOW_GHG(t+1) =E=  TSLOW_GHG(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dslow) );
+
+eq_tfastghg(t+1)..                       TFAST_GHG(t+1) =E=  TFAST_GHG(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) ) * ( 1 - exp(-tstep/dfast) );
+
+eq_tatmghg(t)..                          TATM_GHG(t)  =E=  TSLOW_GHG(t) + TFAST_GHG(t);
+
 ** forcing to temperature 
-eq_tslow(t+1)..  TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - forcing_srm(t) - SRM(t) ) * ( 1 - exp(-tstep/dslow) );
+eq_tslow(t+1)..                          TSLOW(t+1) =E=  TSLOW(t) * exp(-tstep/dslow) + QSLOW * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - FORC_SRM(t) ) * ( 1 - exp(-tstep/dslow) );
 
-eq_tfast(t+1)..  TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - forcing_srm(t) - SRM(t) ) * ( 1 - exp(-tstep/dfast) );
+eq_tfast(t+1)..                          TFAST(t+1) =E=  TFAST(t) * exp(-tstep/dfast) + QFAST * ( sum(ghg, FORCING(ghg,t) ) + forcing_exogenous(t) - FORC_SRM(t) ) * ( 1 - exp(-tstep/dfast) );
 
-eq_tatm(t)..       TATM(t)  =E=  TSLOW(t) + TFAST(t);
+eq_tatm(t)..                             TATM(t)  =E=  TSLOW(t) + TFAST(t);
 
 ** calculate alphas imposing IRF 
-eq_irflhs(t)$(active('co2'))..    IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
+eq_irflhs(t)$(active('co2'))..           IRF(t)    =E= ALPHA(t) * sum(box, emshare(box) * taubox(box) * ( 1 - exp(-100/(ALPHA(t)*taubox(box)) ) ) );
 
 *** IRF max is 97. Smooth GAMS approximation: [f(x) + g(y) - sqrt(sqr(f(x)-g(y)) + sqr(delta))] /2
-eq_irfrhs(t)$(active('co2'))..    IRF(t)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
+eq_irfrhs(t)$(active('co2'))..           IRF(t)    =E= ( ( irf_max + ( irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) - 
                                                     sqrt( sqr(irf_max - (irf_preindustrial + irC * C_SINKS(t) * CO2toC + irT * TATM(t) ) ) + sqr(delta) ) ) / 2;
 
-eq_obj..          OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
+eq_obj..                                 OBJ =E= sum(t,sqr(TATM(t)-target_temp(t)) );
 
 **  Upper and lower bounds for stability
 CONC.LO(cghg,t) = 1e-9;
@@ -224,6 +243,9 @@ FF_CH4.up(t) = 1;
 ALPHA.l(t) = 0.35;
 ** Deactivate SRM by default
 SRM.fx(t) = 0;
+
+*** Add variables to caculate SRM economics
+$batinclude "Model/srm_impacts.gms"
 
 ** Solution options
 option iterlim = 99900;

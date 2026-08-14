@@ -10,4 +10,4 @@ $gdxin
 forcing_exogenous(t)= (sum( (t_rcp,sources)$thisttot(t_rcp,t),forcing_rcp(t_rcp,'%rcp%',sources)) + 3*sum(t_rcp$thisttot(t_rcp,t),forcing_rcp(t_rcp,'%rcp%','bcsnow'))) / tstep;
 
 ** Exogenous forcing from SRM is 0 by default
-forcing_srm(t) = 0;
+background_srm(t) = 0;
