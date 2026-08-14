@@ -44,16 +44,31 @@ mort_srm = 7e3;
 csrm = 1e-2;
 eff_decline_srm = 0.01;
 
-pop('1') = 7.0; 
-y('1') = 8e2;
+pop('1') = 7.0;
+y('1') = 8e1;   # trillion USD, 2020 gross world product (~85 tn$); ypc0 ~ 11.4 k$/person
 
-g(t) = 0.02;
-gpop(t) = 0.01;
+* Calendar year of each model period, same mapping as Model/initialization.gms
+* (t = 1 is 2020, so t_proj = yr_2020 - tstep + t*tstep).
+PARAMETER yr(t) "calendar year of model period t";
+yr(t) = yr_2020 - tstep + t.val * tstep;
 
+SCALARS  g0             "initial GDP growth rate"                          /0.025/
+         gpop0          "initial population growth rate"                   /0.01/
+         gdp_flat_until "last year of undiminished GDP growth"             /2030/
+         gdp_zero_from  "year GDP growth has fallen to zero"               /2200/
+         pop_zero_from  "year population growth has fallen to zero"        /2100/;
+
+* GDP growth holds at g0 through gdp_flat_until, then falls linearly to zero at
+* gdp_zero_from and stays there.
+g(t) = g0 * min(1, max(0, (gdp_zero_from - yr(t)) / (gdp_zero_from - gdp_flat_until) ));
+
+* Population growth falls linearly from gpop0 today to zero at pop_zero_from.
+gpop(t) = gpop0 * max(0, (pop_zero_from - yr(t)) / (pop_zero_from - yr('1')) );
+
+* Both paths now plateau on their own (y peaks well below the old 10*y('1') cap
+* and pop below the old 11 bn one), so no min() clipping is applied.
 loop(t,y(t+1) = y(t) * (1 + g(t)) ** tstep );
-y(t) = min(y(t),10*y('1'));
 loop(t,pop(t+1) = pop(t) * (1 + gpop(t)) ** tstep );
-pop(t) = min(pop(t),11);
 ypc(t) = y(t) / pop(t) * 1e3;
 
 ypc0 = y('1') / pop('1') * 1e3;
@@ -72,12 +87,12 @@ eq_damtot;
 
 eq_impactcc(t)..           DAMFRAC_TEMP(t) =E= a0 * power( TATM(t), b0);
 
-eq_totforcghg(t)..         TOT_FORC(t) =E= delta + ( sum(cghg, FORCING(cghg,t) )
-                                                    + sqrt( sqr( sum(cghg, FORCING(cghg,t) ) ) + sqr(delta) ) ) / 2;
+eq_totforcghg(t)..         TOT_FORC(t) =E= delta + ( sum(cghg, FORCING(cghg,t) ) + forcing_exogenous(t)
+                                                    + sqrt( sqr( sum(cghg, FORCING(cghg,t) ) + forcing_exogenous(t) ) + sqr(delta) ) ) / 2;
 
 eq_effsrm(t)..             EFF_SRM(t) =E= 1 - (power( Tecs/forc2x * TOT_FORC(t), b0) * (1 + sqr( FORC_SRM(t) / TOT_FORC(t) ) - 2 * ( FORC_SRM(t) / TOT_FORC(t)) * cos( srm_angle * 3.14159 / 180 ) ) - power( Tecs/forc2x * (TOT_FORC(t) - FORC_SRM(t)), b0) ) / power( Tecs/forc2x * TOT_FORC(t), b0);
 
-eq_impactsrm(t)..          DAMFRAC_SRM(t) =E= a0 * power( TATM_GHG(t), b0) * (1 - EFF_SRM(t)) - a0 * power( TATM(t), b0);
+eq_impactsrm(t)..          DAMFRAC_SRM(t) =E= a0 * power( TATM_GHG(t), b0) * (1 - EFF_SRM(t));
 
 eq_qsrm(t)..               Q_SRM(t) =E= ( background_srm(t) + SRM(t) ) / ( tgtoforc * (1 - eff_decline_srm *  Q_SRM(t) ) );
 
