@@ -153,21 +153,21 @@ input_categories <- c("ecs"="Climate",
                       "tcr"="Climate",
                       "rcp"="Socio-economic",
                       "pulse_time"="Socio-economic",
-                      "geo_start"="SAI policy",
-                      "geo_end"="SAI policy",
-                      "cool_rate"="SAI policy",
+                      "geo_start"="SAI",
+                      "geo_end"="SAI",
+                      "cool_rate"="SAI",
                       "alpha"="Impacts",
                       "delta"="Normative",
-                      "theta"="SAI physics",
-                      "prob"="SAI policy",
+                      "theta"="Impacts",
+                      "prob"="SAI",
                       "dg"="Socio-economic",
-                      "term"="SAI policy",
+                      "term"="SAI",
                       "mortality_ozone"="Impacts",
                       "vsl"="Normative",
                       "vsl_eta"="Normative",
                       "mortality_srm"="Impacts",
-                      "forctoTg"="SAI physics",
-                      "TgtoUSD"="Technology")
+                      "forctoTg"="SAI",
+                      "TgtoUSD"="SAI")
 
 input_axis_labels <- c("ecs"="plain(ECS)",
                        "tcr"="plain(TCR)",
@@ -273,14 +273,16 @@ damnorm %>%
 
 dr <- ggplot(damnorm) +
   geom_smooth(aes(x=delta*100,y=log10(npc_norm),color=gas),
-              method="loess") +
+  method = "gam",
+  formula = y ~ s(x, bs = "cs", k=7)) +
   scale_y_continuous(labels = pow10_labels) +
   xlab("Discount rate [%]") + ylab("Normalized cost") +
   coord_cartesian(ylim = c(-0.5,1) ) + ggpubr::theme_pubr(legend="none")
 
 alpha <- ggplot(damnorm) +
   geom_smooth(aes(x=alpha*100,y=log10(npc_norm),color=gas),
-              method="loess") +
+  method = "gam",
+  formula = y ~ s(x, bs = "cs")) +
 #  geom_density(aes(x=alpha*100,y=after_stat(scaled))) +
   scale_y_continuous(labels = pow10_labels) +
   xlab(expression("Climate damages [%GDP " * K^-2 * "]")) + ylab("") +
@@ -289,9 +291,12 @@ alpha <- ggplot(damnorm) +
                   ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
+median(damnorm %>% filter(gas=="co2" & delta==0.03) %>% pull(npc_norm),na.rm=TRUE)
+
 theta <- ggplot(damnorm) +
   geom_smooth(aes(x=theta,y=log10(npc_norm),color=gas),
-              method="loess") +
+  method = "gam",
+  formula = y ~ s(x, bs = "cs")) +
   scale_y_continuous(labels = pow10_labels) +
 #  geom_density(aes(x=theta,y=after_stat(scaled))) +
   xlab("SAI angle [°]") + ylab("") +
@@ -302,16 +307,18 @@ theta <- ggplot(damnorm) +
 
 term <- ggplot(damnorm) +
   geom_smooth(aes(x=log10(prob),y=log10(npc_norm),color=gas),
-              method="loess") +
+  method = "gam",
+  formula = y ~ s(x, bs = "cs")) +
   scale_y_continuous(labels = pow10_labels) +
   scale_x_continuous(labels = pow10_labels) +
-  xlab("Year of termination") + ylab("") +
+  xlab("Yearly probability of policy abandonment") + ylab("") +
   coord_cartesian(ylim = c(-0.5,1) ) +
   ggpubr::theme_pubr(legend="none")
 
 ecs <- ggplot(damnorm) +
   geom_smooth(aes(x=ecs/10,y=log10(npc_norm),color=gas),
-              method="loess") +
+              method="gam",
+  formula = y ~ s(x, bs = "cs")) +
 #  geom_density(aes(x=ecs/10,y=after_stat(scaled))) +
   scale_y_continuous(labels = pow10_labels) +
   xlab("Climate equilibrium sensitivity [K]") + ylab("") +

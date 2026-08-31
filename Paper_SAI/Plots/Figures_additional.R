@@ -81,7 +81,7 @@ tail_input_catalog <- tibble::tribble(
   "mortality_ozone", "ozone_mortality", "Ozone mortality", "ozone_mortality", "other",
   "dg",              "growth_g",        "Growth g",        "growth_g",        "other",
   "pulse_time",      "pulse_year",      "Pulse year",      "pulse_year",      "uniform",
-  "prob",            "term_prob",       "Term. prob.",     "term_prob",       "loguniform"
+  "prob",            "term_prob",       "Ab. prob.",     "term_prob",       "loguniform"
 )
 
 unknown_matrix_inputs <- setdiff(FIG2_MATRIX_INPUTS, tail_input_catalog$param)

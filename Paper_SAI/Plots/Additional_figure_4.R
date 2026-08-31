@@ -55,7 +55,7 @@ input_catalog <- tibble::tribble(
   "delta", "discount",     "Discount",  "uniform",
   "alpha", "damage_alpha", "Damages",   "other",
   "theta", "sai_angle",    "SAI angle", "other",
-  "prob",  "term_prob",    "Term. prob.", "loguniform"
+  "prob",  "term_prob",    "Ab. prob.", "loguniform"
 )
 
 if (!setequal(FIG2_MATRIX_INPUTS, input_catalog$param)) {

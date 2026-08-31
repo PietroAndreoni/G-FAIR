@@ -29,3 +29,5 @@ Montecarlo*/
 *.gsp
 
 *.pdf
+
+Paper_SVG/output/

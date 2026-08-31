@@ -112,7 +112,9 @@ set.seed(seed)
 if (overwrite_data==T | !file.exists(paste0(res,"/id_montecarlo.csv"))) {
     data <- data.frame()
   } else {
-    data <- mc_strip_csv_index(as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"), stringsAsFactors = FALSE)))
+    data <- mc_backfill_infra_life(
+      mc_strip_csv_index(as.data.frame(read.csv(paste0(res,"/id_montecarlo.csv"), stringsAsFactors = FALSE))),
+      paste0(res, "/id_montecarlo.csv"))
     validate_id_montecarlo(data, paste0(res, "/id_montecarlo.csv"))
     write.csv(data, file=paste0(res,"/id_montecarlo_copy.csv"), row.names = FALSE) # store a copy of previous version database
   }
@@ -169,14 +171,18 @@ map_discrete <- function(u, choices) {
 }
 
 
-# Each realization is a point in a 19-dimensional unit hypercube:
+# Each realization is a point in a 20-dimensional unit hypercube:
 #  FAIR parameters (drive a FAIR run, encoded in the gdx file name):
 #   1: ecs, 2: tcr (-> correlated joint lognormal)
 #   3: rcp, 4: pulse, 5: cool, 6: term, 7: start, 8: term_delta (geometric; hazard from col 12)
+#   20: infra_life (emitting-infrastructure lifetime, log-uniform)
 #  Post-processing parameters (applied to the gdx output, not part of any run):
 #   9: theta, 10: alpha, 11: delta, 12: prob (per-year termination hazard), 13: mortality_srm, 14: forctoTg,
 #   15: TgtoUSD, 16: mortality_ozone, 17: vsl, 18: vsl_eta, 19: dg
 # (the column->parameter mapping is SOBOL_COLUMN_MAP in all_parameters.R)
+# infra_life sits at column 20 rather than next to `pulse` deliberately: the map is
+# append-only, so every column an earlier campaign used keeps its meaning AND its
+# values (Owen scrambling is per-dimension -- see the note in all_parameters.R).
 n_dim <- N_SOBOL_DIM
 
 # Per-column tail-cut factors: scaling a column's uniform u -> u*filter_frac
@@ -293,6 +299,16 @@ term_delay <- mc_geometric_delay(unit_draws[,8], hazard)
 pulse_draw <- map_discrete(unit_draws[,4], pulse_choices)
 term_delta_draw <- mc_term_delta(pulse_draw, term_delay, t_horizon)
 
+# Lifetime of the emitting infrastructure (col 20), log-uniform on
+# [INFRA_LIFE_LO, INFRA_LIFE_HI] -- the same inverse-CDF idiom as the hazard above.
+# The model has tstep = 1 yr, so the continuous draw is rounded to a whole period;
+# that gives the two endpoints half-width bins, which is the ordinary cost of
+# discretizing a continuous support and not a sampling bug. The clamp only guards
+# against the endpoint bins being pushed outside the support by that rounding.
+infra_life_draw <- pmin(pmax(
+  as.integer(round(exp(qunif(unit_draws[,20], log(INFRA_LIFE_LO), log(INFRA_LIFE_HI))))),
+  as.integer(INFRA_LIFE_LO)), as.integer(INFRA_LIFE_HI))
+
 new_data <- data.frame(
   # --- FAIR-run parameters ---
   ecs = round(ecs_draw * 10, 0),
@@ -303,6 +319,7 @@ new_data <- data.frame(
   term = map_discrete(unit_draws[,6], term_choices),
   start = map_discrete(unit_draws[,7], start_choices),
   term_delta = term_delta_draw,   # absolute termination year (deployment + geometric delay, censored at horizon)
+  infra_life = infra_life_draw,   # years the emitting infrastructure operates (1 = single-period pulse)
   term_delay = term_delay,
   # --- post-processing parameters (all distributions live in all_parameters.R) ---
   theta           = round(qlnorm_fit_trunc(unit_draws[,9], lo=THETA_TRUNC[["lo"]], hi=THETA_TRUNC[["hi"]],
@@ -335,8 +352,6 @@ if (main_scenario==T) {
                     mutate(rcp=MAIN_RCP, cool=MAIN_COOL, term=MAIN_TERM, start=MAIN_START, pulse=MAIN_PULSE_SET[1] ),
                   new_data %>%
                     mutate(rcp=MAIN_RCP, cool=MAIN_COOL, term=MAIN_TERM, start=MAIN_START, pulse=MAIN_PULSE_SET[2] ) )
-    # Fix the post-processing parameters for the deterministic main scenario
-    # (previously applied in Analyze_montecarlo.R).
     new_data <- new_data %>% mutate(vsl = MAIN_VSL, delta = MAIN_DELTA, vsl_eta = MAIN_VSL_ETA)
     if (!keep_theta_uncertain) new_data <- new_data %>% mutate(theta = base_theta) }
 
@@ -484,6 +499,18 @@ if (diagnostics == T) {
              function(q) qunif(q, log10(hazard_lo), log10(hazard_hi)),
              sprintf("log10(prob): hazard ~ LogUniform(%g,%g)", hazard_lo, hazard_hi),
              note = "per-year termination hazard; drives term_delta, drawn to 4 sig figs")
+
+  # infra_life ~ round(LogUniform(INFRA_LIFE_LO, INFRA_LIFE_HI)). Integer-valued, so
+  # use the discrete panel: the expected mass on year k is the log-uniform CDF
+  # integrated over [k-1/2, k+1/2], which is exactly the binning round() applies.
+  # The two endpoints get half-width bins, so their expected mass is half a
+  # neighbour's -- that is the theory here, not a defect.
+  diag_discrete(new_data$infra_life,
+                function(x) punif(log(pmax(x, .Machine$double.eps)),
+                                  log(INFRA_LIFE_LO), log(INFRA_LIFE_HI)),
+                1,
+                sprintf("infra_life ~ round(LogUniform(%g,%g)) [yr]", INFRA_LIFE_LO, INFRA_LIFE_HI),
+                note = "emitting-infrastructure lifetime; 1 = the classic single-period pulse")
 
   # Termination delay (years of SRM before termination), the quantity the hazard
   # acts on directly: term_delta itself is the absolute year (pulse + delay,

@@ -114,7 +114,7 @@ N_SCENARIOS_DEFAULT <- 8192L          # default number of draws per Generate cal
 # -> parameter assignment of the Sobol/uniform draw matrix. Changing the order
 # here means re-aligning Generate_montecarlo.R; documented so the mapping is
 # explicit and never silently reshuffled.
-N_SOBOL_DIM <- 19L
+N_SOBOL_DIM <- 20L
 SOBOL_COLUMN_MAP <- c(
   ecs = 1, tcr = 2,            # 1-2 correlated joint lognormal (climate)
   rcp = 3, pulse = 4, cool = 5, term = 6, start = 7,
@@ -122,8 +122,17 @@ SOBOL_COLUMN_MAP <- c(
   theta = 9, alpha = 10, delta = 11,
   prob = 12,                  # 12 per-year termination hazard (drives col 8)
   mortality_srm = 13, forctoTg = 14, TgtoUSD = 15,
-  mortality_ozone = 16, vsl = 17, vsl_eta = 18, dg = 19
+  mortality_ozone = 16, vsl = 17, vsl_eta = 18, dg = 19,
+  infra_life = 20             # 20 emitting-infrastructure lifetime (see section 2)
 )
+# APPEND-ONLY: new parameters take the next free column and never displace an
+# existing one. Owen-scrambled Sobol scrambles per dimension, so raising
+# N_SOBOL_DIM leaves every earlier column bit-identical at the same seed --
+# verified for 19 -> 20:
+#   identical(qrng::sobol(n, 19, randomize = "Owen", seed = s),
+#             qrng::sobol(n, 20, randomize = "Owen", seed = s)[, 1:19])
+# is TRUE. That is what lets a new column be added without invalidating the draws
+# (and therefore the gdx cache) of an existing campaign.
 
 # Tail filter (see Generate_montecarlo.R --filter): optionally truncate the UPPER
 # tail of the log-normal parameters at a percentile by scaling that column's
@@ -168,6 +177,20 @@ START_CHOICES <- seq(2025, 2100, by = 25)  # geo_start: calendar year SAI ramp-u
 # when it re-derives the no-SRM rows -- see inconsistency report.
 COOL0_TERM_SENTINEL  <- 2700
 COOL0_START_SENTINEL <- 2700
+
+# infra_life -- lifetime of the emitting infrastructure the SAI is substituting for
+# [yr]. The perturbation is no longer a one-year pulse but an asset that emits
+# PULSE_SIZE% of the 2005 emission in EVERY year it operates, from `pulse` to
+# `pulse + infra_life - 1`; cumulative release is therefore infra_life x the pulse.
+# infra_life == 1 IS the classic pulse, which is why the whole change is
+# backward-compatible (see the %iltag% block in experiments/srm.gms).
+#
+# Drawn LOG-UNIFORM on [1, 100] years -- the same inverse-CDF idiom as the
+# termination hazard -- because plausible asset lifetimes span two orders of
+# magnitude (a genset, a truck fleet, a coal plant, a gas network) and are much
+# better described by their order of magnitude than by their level.
+INFRA_LIFE_LO <- 1     # years; also the "pulse" special case
+INFRA_LIFE_HI <- 1   # years; pulse (<=80) + 99 stays well inside T_HORIZON
 
 
 # -----------------------------------------------------------------------------

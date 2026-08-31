@@ -82,7 +82,9 @@ if (file.exists(paste0(res,"/problematic_scenarios.csv"))) {
 
 if (!file.exists(paste0(input,"/id_montecarlo.csv"))) stop("Please generate new data if no pre-existing are available")
 
-data <- mc_strip_csv_index(as.data.frame(read.csv(paste0(input,"/id_montecarlo.csv"), stringsAsFactors = FALSE)))
+data <- mc_backfill_infra_life(
+  mc_strip_csv_index(as.data.frame(read.csv(paste0(input,"/id_montecarlo.csv"), stringsAsFactors = FALSE))),
+  paste0(input, "/id_montecarlo.csv"))
 validate_id_montecarlo(data, paste0(input, "/id_montecarlo.csv"))
 
 if (skip_problematic==T && nrow(problematic_existing) > 0) {
@@ -115,6 +117,7 @@ gams <- paste0("gams FAIR.gms --experiment=srm",
               " --tcr=",data[i,]$tcr,
               " --rcp=",data[i,]$rcp,
               " --pulse_time=",data[i,]$pulse,
+              " --infra_life=",data[i,]$infra_life,
               " --rate_of_cooling=",data[i,]$cool,
               " --start_rampdown=",data[i,]$term-RAMP_DOWN_YEARS,
               " --end_rampdown=",data[i,]$term,
@@ -122,6 +125,12 @@ gams <- paste0("gams FAIR.gms --experiment=srm",
               " --end_rampup=",data[i,]$start+RAMP_UP_YEARS,
               " --termination_time=",data[i,]$term_delta,
               ' --results_folder="',res,'"')  # quoted: the resolved path may contain spaces
+
+# Mirrors the %iltag% block in experiments/srm.gms EXACTLY: empty at infra_life == 1
+# so the names of every already-solved pulse run are unchanged and the skip below
+# still recognizes them. Any drift between the two would silently re-solve the
+# whole campaign, so keep these two in sync.
+il_tag <- if (as.integer(data[i,]$infra_life) == 1L) "" else paste0("_IL", data[i,]$infra_life)
 
 results_name <-  paste0(data[i,]$rcp,
                         "_EXPsrmpulsemaskedterm_TER",data[i,]$term_delta,
@@ -132,6 +141,7 @@ results_name <-  paste0(data[i,]$rcp,
                         "_RC",data[i,]$cool,
                         "_EC",data[i,]$term,
                         "_BC",data[i,]$start,
+                        il_tag,
                         "_IChistorical_run")
 
 cat("Checking scenario",i,"with gas",gas,"...\n")

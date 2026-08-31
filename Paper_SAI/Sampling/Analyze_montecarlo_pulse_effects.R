@@ -76,6 +76,11 @@ extract_names_dt <- function(files_vec) {
   DT[, tcr := str_extract(file, "(?<=TCR).+?(?=_)")]
   DT[, term := str_extract(file, "(?<=TER).+?(?=_)")]
   DT[, experiment := str_extract(file, "(?<=EXP).+?(?=_)")]
+  # Emitting-infrastructure lifetime; see the matching block in Analyze_montecarlo.R.
+  # experiments/srm.gms omits the _IL tag at infra_life == 1, which is what every
+  # pre-existing single-period-pulse file is.
+  DT[, infra_life := str_extract(file, "(?<=_IL)[0-9]+(?=_)")]
+  DT[is.na(infra_life), infra_life := "1"]
   DT
 }
 
@@ -328,7 +333,10 @@ sanitized_names <- extract_names_dt(filelist)
 scenario_names <- setdiff(names(sanitized_names), c("gdx", "file", "experiment"))
 
 k_pulse <- setdiff(scenario_names, c("term", "cool_rate", "geo_start", "geo_end"))
-k_base <- setdiff(scenario_names, c("term", "cool_rate", "geo_start", "geo_end", "gas", "pulse_time"))
+# EXPbase is written by FAIR.gms before the experiment file is included, so it has no
+# _IL tag and is the same world for every infrastructure lifetime: drop infra_life
+# from its key or it would never join.
+k_base <- setdiff(scenario_names, c("term", "cool_rate", "geo_start", "geo_end", "gas", "pulse_time", "infra_life"))
 k_no_term <- setdiff(scenario_names, "term")
 
 all_pulse <- unique(sanitized_names[experiment == "pulse", ..k_pulse])

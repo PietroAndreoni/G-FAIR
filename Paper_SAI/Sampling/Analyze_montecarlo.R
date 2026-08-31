@@ -64,6 +64,12 @@ extract_names_dt <- function(files_vec) {
   DT[, tcr := str_extract(file, "(?<=TCR).+?(?=_)")]
   DT[, term := str_extract(file, "(?<=TER).+?(?=_)")]
   DT[, experiment := str_extract(file, "(?<=EXP).+?(?=_)")]
+  # Emitting-infrastructure lifetime. experiments/srm.gms writes the _IL tag only
+  # when infra_life > 1, so an absent tag means the classic single-period pulse --
+  # which is what every file produced before this axis existed is. Anchored on "_IL"
+  # (not a bare "IL") so no other segment of the name can match.
+  DT[, infra_life := str_extract(file, "(?<=_IL)[0-9]+(?=_)")]
+  DT[is.na(infra_life), infra_life := "1"]
   return(DT)
 }
 
@@ -144,8 +150,8 @@ npv_aggregator <- function(DT, keep_names = all_names) {
 # Every field here is read from the srm-only world, as intended:
 #   temp_srm, concch4_base  <- experiment "srm"  (baseline SRM active, no pulse)
 #   temp_base               <- experiment "base" (no SRM; counterfactual for masking)
-#   srm                     <- forcing_srm, the baseline SAI deployment schedule.
-# forcing_srm is a GAMS *parameter* set once per scenario and never re-assigned
+#   srm                     <- background_srm, the baseline SAI deployment schedule.
+# background_srm is a GAMS *parameter* set once per scenario and never re-assigned
 # across experiments (termination acts on the SRM *variable*, which is identically
 # 0 in the srm run), so taking it from the selected experiment's gdx yields the
 # srm-run values. That makes the total gas- and termination-independent, so we key
@@ -312,7 +318,7 @@ prepare_join_table <- function(filter_experiment) {
   base <- base[tot_forcing_exp, on = c("t", scenario_names)]
   base <- base[temp_exp, on = c("t", scenario_names)]
   base <- backsrm_exp[base, on = c("t",scenario_names)]
-  # forcing_srm is a GAMS parameter, so zero records are omitted from the gdx:
+  # background_srm is a GAMS parameter, so zero records are omitted from the gdx:
   # the SRM background forcing is genuinely 0 outside the deployment window.
   base[is.na(srm), srm := 0]
   base <- dsrm_exp[base, on = c("t",scenario_names)]
@@ -434,7 +440,9 @@ sanitized_names <- extract_names_dt(filelist)
 
 # Load id_montecarlo from folders
 id_list <- lapply(input_folder, function(folder) {
-  mc_strip_csv_index(read.csv(file.path(folder, "id_montecarlo.csv"), stringsAsFactors = FALSE))
+  mc_backfill_infra_life(
+    mc_strip_csv_index(read.csv(file.path(folder, "id_montecarlo.csv"), stringsAsFactors = FALSE)),
+    file.path(folder, "id_montecarlo.csv"))
 })
 id_montecarlo <- rbindlist(id_list, fill = TRUE)
 setDT(id_montecarlo)
@@ -488,7 +496,10 @@ all_names <- c("gas", names(id_montecarlo))
 # extract scenario names
 scenario_names <- setdiff(names(sanitized_names), c("gdx","file","experiment"))
 pulse_scenarios <- setdiff(scenario_names, c("cool_rate","geo_end","geo_start","term"))
-base_scenarios <- setdiff(pulse_scenarios, c("gas","pulse_time"))
+# The no-SRM, no-pulse base run is written by FAIR.gms before the experiment file is
+# included, so it carries neither a pulse nor an _IL tag and is keyed on (rcp,ecs,tcr)
+# alone. infra_life must therefore be dropped here, or the base run would never join.
+base_scenarios <- setdiff(pulse_scenarios, c("gas","pulse_time","infra_life"))
 
 # srm-only world climate scenario (termination- and gas-independent): the key the
 # srmnopulse damage filter aggregates on, and which the pulse-effects script joins.
@@ -541,7 +552,8 @@ k_all     <- scenario_names
 k_no_term <- setdiff(scenario_names, "term")
 k_pulse   <- setdiff(scenario_names, c("term", "cool_rate", "geo_start", "geo_end"))
 k_base    <- setdiff(scenario_names,
-                     c("term", "cool_rate", "geo_start", "geo_end", "gas", "pulse_time"))
+                     c("term", "cool_rate", "geo_start", "geo_end", "gas", "pulse_time",
+                       "infra_life"))   # EXPbase carries no _IL tag; see base_scenarios
 
 ## set keys once for fast joins inside the loop
 setkeyv(dt_srmpt,   k_all)
@@ -709,7 +721,7 @@ SRM <- setDT(gdxtools::batch_extract("SRM", files = files_loop)$SRM)
 SRM <- merge(SRM, sanitized_names, by = "gdx", all = FALSE)
 SRM <- sanitize_dt(SRM)
 
-background_srm <- setDT(gdxtools::batch_extract("forcing_srm", files = files_loop)$forcing_srm)
+background_srm <- setDT(gdxtools::batch_extract("background_srm", files = files_loop)$background_srm)
 background_srm <- merge(background_srm, sanitized_names, by = "gdx", all = FALSE)
 background_srm <- sanitize_dt(background_srm)
 
@@ -790,27 +802,64 @@ mc_assert_complete_time_window(dt_sel, c("ID", "gas"),
 dt_sel <- truncate_at_breach(dt_sel, srm_breach)
 res_sel <- npv_aggregator(dt_sel, all_names)
 
-# pulse_size & scc (reuse earlier approach but modularized)
-pulse_size <- W_EMI[ ghg == gas & experiment %in% c("srm","srmpulse"), .(t, value, experiment, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)]
-pulse_size <- pulse_size[, .(pulse_size = value[ experiment == "srmpulse" ] - value[ experiment == "srm" ]), by = .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)]
+# Emission magnitude of the perturbation, read off the model's own emissions rather
+# than recomputed from pulse_size%: the srmpulse world minus the srm world, in tonnes.
+#
+# The perturbation is an emitting asset that runs for `infra_life` years, so this
+# difference is nonzero in infra_life consecutive periods, not one. That gives two
+# legitimate denominators and both are carried through to the outputs:
+#   pulse_size        -- tonnes released over the whole lifetime. Metrics divided by
+#                        it read as $/tonne. At infra_life == 1 it is the old
+#                        single-period value, so every legacy output is unchanged.
+#   pulse_size_annual -- tonnes per year of operation, i.e. the asset's emitting
+#                        capacity. Metrics divided by it read as $ per (tonne/yr) --
+#                        an annuity on the asset rather than a price on a tonne.
+# NB at large infra_life the perturbation is far from marginal (100 years at 100% of
+# the 2005 emission is ~100x a pulse), and damages are convex in temperature, so the
+# resulting figures are AVERAGE costs over the asset, not marginal SCCs.
+pulse_size <- W_EMI[ ghg == gas & experiment %in% c("srm","srmpulse"), .(t, value, experiment, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life)]
+pulse_size <- pulse_size[, .(pulse_size = value[ experiment == "srmpulse" ] - value[ experiment == "srm" ]), by = .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life)]
 pulse_size <- pulse_size[ pulse_size != 0 ]
 pulse_size[ , pulse_size := ifelse(gas == "co2", pulse_size * 1e9, pulse_size * 1e6)]
-pulse_size[, t:=NULL]
-mc_assert_no_missing(pulse_size, c("pulse_size", "gas", "rcp", "ecs", "tcr", "cool_rate", "pulse_time", "geo_start", "geo_end"),
+# Collapse the operating years. The previous code dropped `t` instead, which is only
+# correct for a one-period pulse: with infra_life > 1 it leaves infra_life duplicate
+# rows per scenario, which the merges below would multiply out.
+pulse_size <- pulse_size[order(t), .(pulse_size        = sum(pulse_size),
+                                     pulse_size_annual = first(pulse_size),
+                                     emit_years        = .N,
+                                     emit_rate_spread  = max(pulse_size) - min(pulse_size)),
+                         by = .(gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life)]
+# The asset emits the same amount every year it runs, for exactly infra_life years.
+# Assert both, so a future change to the injection block in experiments/srm.gms
+# cannot silently redefine what these denominators mean.
+if (any(pulse_size$emit_years != as.integer(pulse_size$infra_life))) {
+  stop("pulse_size chunk ", n_chunk, ": emitting years do not match infra_life for ",
+       sum(pulse_size$emit_years != as.integer(pulse_size$infra_life)), " scenario(s).",
+       call. = FALSE)
+}
+if (any(abs(pulse_size$emit_rate_spread) > 1e-6 * abs(pulse_size$pulse_size_annual))) {
+  stop("pulse_size chunk ", n_chunk, ": emission rate is not constant over the ",
+       "infrastructure lifetime; the annual denominator is not well defined.", call. = FALSE)
+}
+pulse_size[, c("emit_years", "emit_rate_spread") := NULL]
+mc_assert_no_missing(pulse_size, c("pulse_size", "pulse_size_annual", "gas", "rcp", "ecs", "tcr", "cool_rate", "pulse_time", "geo_start", "geo_end", "infra_life"),
                      paste0("pulse_size chunk ", n_chunk))
 
 # scc calculation (with SRM)
+# infra_life is part of the key: two draws can share every other FAIR axis and still
+# be different runs because their infrastructure operates for a different number of
+# years. Leaving it out would cross-join their trajectories.
 scc <- merge(
-  TATM[experiment == "srm", .(t, temp_srm = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)],
-  TATM[experiment == "srmpulse", .(t, temp_srmpulse = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end)],
-  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE
+  TATM[experiment == "srm", .(t, temp_srm = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life)],
+  TATM[experiment == "srmpulse", .(t, temp_srmpulse = value, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life)],
+  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end","infra_life"), all = FALSE
 )
-scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all = FALSE)
-scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, concch4_base = value)],  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
-scc <- merge(scc, tot_forcing[experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, forc_srm = value)],
-             by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
-scc <- merge(scc, tot_forcing[experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, forc_srmpulse = value)],
-             by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end"), all.x = TRUE)
+scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end","infra_life"), all = FALSE)
+scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life, concch4_base = value)],  by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end","infra_life"), all.x = TRUE)
+scc <- merge(scc, tot_forcing[experiment == "srm", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life, forc_srm = value)],
+             by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end","infra_life"), all.x = TRUE)
+scc <- merge(scc, tot_forcing[experiment == "srmpulse", .(t, gas, rcp, ecs, tcr, cool_rate, pulse_time, geo_start, geo_end, infra_life, forc_srmpulse = value)],
+             by = c("t","gas","rcp","ecs","tcr","cool_rate","pulse_time","geo_start","geo_end","infra_life"), all.x = TRUE)
 mc_assert_no_missing(scc, c("temp_srm", "temp_srmpulse", "concch4_pulse", "concch4_base",
                             "forc_srm", "forc_srmpulse"),
                      paste0("SCC-with-SRM climate inputs chunk ", n_chunk))
@@ -848,28 +897,36 @@ scc_agg <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time)))
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
                 by = scc_by ]
 scc_agg <- merge(scc_agg, pulse_size, by = intersect(names(scc_agg), names(pulse_size)), all.x = TRUE)
-scc_agg[, scc := (damnpv + ozpnpv) / pulse_size]
-mc_assert_no_missing(scc_agg, c("ID", "gas", "pulse_size", "scc"), paste0("SCC-with-SRM output chunk ", n_chunk))
+# scc     : $ per tonne released over the asset's lifetime
+# scc_cap : $ per (tonne/yr) of the asset's emitting capacity
+# The two coincide when infra_life == 1, which is the pulse case.
+scc_agg[, scc     := (damnpv + ozpnpv) / pulse_size]
+scc_agg[, scc_cap := (damnpv + ozpnpv) / pulse_size_annual]
+mc_assert_no_missing(scc_agg, c("ID", "gas", "pulse_size", "pulse_size_annual", "scc", "scc_cap"), paste0("SCC-with-SRM output chunk ", n_chunk))
 mc_assert_unique_key(scc_agg, c("ID", "gas"), paste0("SCC-with-SRM output chunk ", n_chunk))
 mc_assert_key_set_equal(expected_chunk_keys, unique(scc_agg[, .(ID = as.character(ID), gas = as.character(gas))]),
                         c("ID", "gas"), paste0("SCC-with-SRM output chunk ", n_chunk))
 
 # scc calculation (w/o SRM)
+# The perturbed runs (EXPpulse) are keyed on infra_life; the unperturbed base run is
+# not -- FAIR.gms writes it before the experiment file is included, so it carries no
+# _IL tag and is genuinely the same world for every lifetime. Hence infra_life joins
+# the pulse-side keys only, and broadcasts across the base side.
 scc <- merge(
   TATM[experiment == "base", .(t, temp_base = value, rcp, ecs, tcr)],
-  TATM[experiment == "pulse", .(t, temp_pulse = value, gas, rcp, ecs, tcr, pulse_time)],
+  TATM[experiment == "pulse", .(t, temp_pulse = value, gas, rcp, ecs, tcr, pulse_time, infra_life)],
   by = c("t","rcp","ecs","tcr"), all = FALSE
 )
-scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","pulse_time"), all = FALSE)
+scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, infra_life, concch4_pulse = value)], by = c("t","gas","rcp","ecs","tcr","pulse_time","infra_life"), all = FALSE)
 scc <- merge(scc, CONC[ ghg == "ch4" & experiment == "base", .(t, rcp, ecs, tcr, concch4_base = value)],  by = c("t","rcp","ecs","tcr"), all.x = TRUE)
 scc <- merge(scc, tot_forcing[experiment == "base", .(t, rcp, ecs, tcr, forc_base = value)],
              by = c("t","rcp","ecs","tcr"), all.x = TRUE)
-scc <- merge(scc, tot_forcing[experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, forc_pulse = value)],
-             by = c("t","gas","rcp","ecs","tcr","pulse_time"), all.x = TRUE)
+scc <- merge(scc, tot_forcing[experiment == "pulse", .(t, gas, rcp, ecs, tcr, pulse_time, infra_life, forc_pulse = value)],
+             by = c("t","gas","rcp","ecs","tcr","pulse_time","infra_life"), all.x = TRUE)
 mc_assert_no_missing(scc, c("temp_base", "temp_pulse", "concch4_pulse", "concch4_base",
                             "forc_base", "forc_pulse"),
                      paste0("SCC-no-SRM climate inputs chunk ", n_chunk))
-scc <- merge(scc, id_montecarlo[, c("ID","ecs","tcr","rcp","pulse_time","alpha","delta",
+scc <- merge(scc, id_montecarlo[, c("ID","ecs","tcr","rcp","pulse_time","infra_life","alpha","delta",
                                     "mortality_ozone","vsl","vsl_eta","dg"), with = FALSE],
              by = intersect(names(scc), names(id_montecarlo)), allow.cartesian = TRUE)
 mc_assert_no_missing(scc, c("ID", "alpha", "delta", "mortality_ozone", "vsl", "vsl_eta", "dg"),
@@ -949,9 +1006,10 @@ mc_assert_no_missing(scc, c("tropoz_pollution", "dam"), paste0("SCC-no-SRM compu
 scc_agg2 <- scc[, .(damnpv = sum( dam / (1 + delta)^(t - as.numeric(pulse_time))),
                     ozpnpv = sum( tropoz_pollution / (1 + delta)^(t - as.numeric(pulse_time)))),
                 by = scc_nosrm_by ]
-scc_agg2 <- merge(scc_agg2, pulse_size[, c("gas","ecs","tcr","rcp","pulse_time","pulse_size"), with = FALSE], by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
-scc_agg2[, scc_nosrm := (damnpv + ozpnpv) / pulse_size]
-mc_assert_no_missing(scc_agg2, c("ID", "gas", "pulse_size", "scc_nosrm"), paste0("SCC-no-SRM output chunk ", n_chunk))
+scc_agg2 <- merge(scc_agg2, unique(pulse_size[, c("gas","ecs","tcr","rcp","pulse_time","infra_life","pulse_size","pulse_size_annual"), with = FALSE]), by = intersect(names(scc_agg2), names(pulse_size)), all.x = TRUE)
+scc_agg2[, scc_nosrm     := (damnpv + ozpnpv) / pulse_size]
+scc_agg2[, scc_nosrm_cap := (damnpv + ozpnpv) / pulse_size_annual]
+mc_assert_no_missing(scc_agg2, c("ID", "gas", "pulse_size", "pulse_size_annual", "scc_nosrm", "scc_nosrm_cap"), paste0("SCC-no-SRM output chunk ", n_chunk))
 mc_assert_unique_key(scc_agg2, c("ID", "gas"), paste0("SCC-no-SRM output chunk ", n_chunk))
 # Assert against the narrowed key set: draws whose no-SRM world breaches at or before
 # their pulse_time have no scc_nosrm and are legitimately absent here, while every other
@@ -988,8 +1046,11 @@ if (length(missing_sources) > 0L) {
   )
 }
 combined_wide <- merge(combined_wide, unique(pulse_size), by = intersect(names(combined_wide), names(pulse_size)), all.x = TRUE)
-combined_wide[, npc_srm := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / pulse_size]
-mc_assert_no_missing(combined_wide, c("ID", "gas", "pulse_size", "npc_srm"), paste0("NPC output chunk ", n_chunk))
+# npc_srm     : $ per tonne released over the asset's lifetime
+# npc_srm_cap : $ per (tonne/yr) of the asset's emitting capacity  (equal when L == 1)
+combined_wide[, npc_srm     := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / pulse_size]
+combined_wide[, npc_srm_cap := (dirnpv + srmpnpv + ozpnpv + masknpv + damnpv) / pulse_size_annual]
+mc_assert_no_missing(combined_wide, c("ID", "gas", "pulse_size", "pulse_size_annual", "npc_srm", "npc_srm_cap"), paste0("NPC output chunk ", n_chunk))
 mc_assert_unique_key(combined_wide, c("ID", "gas"), paste0("NPC output chunk ", n_chunk))
 mc_assert_key_set_equal(expected_chunk_keys, unique(combined_wide[, .(ID = as.character(ID), gas = as.character(gas))]),
                         c("ID", "gas"), paste0("NPC output chunk ", n_chunk))
