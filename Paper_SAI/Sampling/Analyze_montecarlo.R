@@ -150,8 +150,8 @@ npv_aggregator <- function(DT, keep_names = all_names) {
 # Every field here is read from the srm-only world, as intended:
 #   temp_srm, concch4_base  <- experiment "srm"  (baseline SRM active, no pulse)
 #   temp_base               <- experiment "base" (no SRM; counterfactual for masking)
-#   srm                     <- background_srm, the baseline SAI deployment schedule.
-# background_srm is a GAMS *parameter* set once per scenario and never re-assigned
+#   srm                     <- forcing_srm, the baseline SAI deployment schedule.
+# forcing_srm is a GAMS *parameter* set once per scenario and never re-assigned
 # across experiments (termination acts on the SRM *variable*, which is identically
 # 0 in the srm run), so taking it from the selected experiment's gdx yields the
 # srm-run values. That makes the total gas- and termination-independent, so we key
@@ -318,7 +318,7 @@ prepare_join_table <- function(filter_experiment) {
   base <- base[tot_forcing_exp, on = c("t", scenario_names)]
   base <- base[temp_exp, on = c("t", scenario_names)]
   base <- backsrm_exp[base, on = c("t",scenario_names)]
-  # background_srm is a GAMS parameter, so zero records are omitted from the gdx:
+  # forcing_srm is a GAMS parameter, so zero records are omitted from the gdx:
   # the SRM background forcing is genuinely 0 outside the deployment window.
   base[is.na(srm), srm := 0]
   base <- dsrm_exp[base, on = c("t",scenario_names)]
@@ -721,7 +721,7 @@ SRM <- setDT(gdxtools::batch_extract("SRM", files = files_loop)$SRM)
 SRM <- merge(SRM, sanitized_names, by = "gdx", all = FALSE)
 SRM <- sanitize_dt(SRM)
 
-background_srm <- setDT(gdxtools::batch_extract("background_srm", files = files_loop)$background_srm)
+background_srm <- setDT(gdxtools::batch_extract("forcing_srm", files = files_loop)$forcing_srm)
 background_srm <- merge(background_srm, sanitized_names, by = "gdx", all = FALSE)
 background_srm <- sanitize_dt(background_srm)
 

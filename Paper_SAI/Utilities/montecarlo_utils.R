@@ -26,8 +26,11 @@ MC_SAMPLER_VERSION <- SAMPLER_VERSION
 MC_T_HORIZON <- as.integer(T_HORIZON)
 MC_HAZARD_LO <- HAZARD_LO
 MC_HAZARD_HI <- HAZARD_HI
+MC_INFRA_LIFE_LO <- INFRA_LIFE_LO
+MC_INFRA_LIFE_HI <- INFRA_LIFE_HI
 
-MC_FAIR_COLS <- c("ecs", "tcr", "rcp", "pulse", "cool", "term", "start", "term_delta")
+MC_FAIR_COLS <- c("ecs", "tcr", "rcp", "pulse", "cool", "term", "start", "term_delta",
+                  "infra_life")
 MC_POST_COLS <- c("theta", "alpha", "delta", "prob", "mortality_srm", "forctoTg",
                   "TgtoUSD", "mortality_ozone", "vsl", "vsl_eta", "dg")
 MC_METADATA_COLS <- c("sampler_version", "sampling_method", "seed", "draw_index",
@@ -36,6 +39,27 @@ MC_REQUIRED_ID_COLS <- c("ID", MC_FAIR_COLS, MC_POST_COLS, MC_METADATA_COLS)
 
 mc_strip_csv_index <- function(x) {
   if ("X" %in% names(x)) x <- x[setdiff(names(x), "X")]
+  x
+}
+
+# Back-fill infra_life on a design drawn before the emitting-infrastructure axis
+# existed. Those campaigns are single-period pulses, which IS infra_life == 1, so
+# the column can be reconstructed exactly rather than guessed -- and an archived
+# id_montecarlo.csv keeps loading, running and analysing unchanged. Applied only to
+# id_montecarlo tables, never to problematic_scenarios.csv (whose columns are used
+# as an anti-join key). The column is inserted in its MC_FAIR_COLS position so the
+# recovered design has the canonical column order.
+mc_backfill_infra_life <- function(x, context = "id_montecarlo.csv") {
+  if ("infra_life" %in% names(x)) return(x)
+  message(context, ": no infra_life column (design predates the emitting-",
+          "infrastructure axis); back-filling infra_life = ", INFRA_LIFE_LO,
+          ", i.e. the single-period pulse it was drawn as.")
+  x$infra_life <- as.integer(INFRA_LIFE_LO)
+  after <- match("term_delta", names(x))
+  if (!is.na(after)) {
+    rest <- setdiff(names(x), c(names(x)[seq_len(after)], "infra_life"))
+    x <- x[c(names(x)[seq_len(after)], "infra_life", rest)]
+  }
   x
 }
 
@@ -226,6 +250,19 @@ validate_id_montecarlo <- function(x, context = "id_montecarlo.csv",
     }
     if (any(as.numeric(x$prob) <= 0 | as.numeric(x$prob) >= 1)) {
       errors <- c(errors, "prob must be a per-year hazard in (0, 1)")
+    }
+    # infra_life indexes model periods (tstep = 1 yr) in experiments/srm.gms, so it
+    # must be a whole number of years, at least 1 (= the single-period pulse), and
+    # no longer than the analysis horizon. Deliberately NOT checked against
+    # INFRA_LIFE_LO/HI: those are the support of one campaign's sampler, which
+    # Generate_montecarlo.R can override per run (--lifetime), so a design drawn on
+    # a different support is valid input here, not corrupt.
+    infra_life <- as.numeric(x$infra_life)
+    if (any(infra_life != floor(infra_life))) {
+      errors <- c(errors, "infra_life must be a whole number of years")
+    }
+    if (any(infra_life < 1 | infra_life > MC_T_HORIZON)) {
+      errors <- c(errors, paste0("infra_life must lie in [1, ", MC_T_HORIZON, "]"))
     }
   }
 

@@ -52,10 +52,10 @@ FF_CH4.fx(t) = ffch4_0(t);
 ** Scenario 1: with SRM, without emission pulse
 
 * build SRM strategy (linear ramp-up and down, flat in between)
-background_srm(t)$(2020 + t.val ge %start_rampup% and 2020 + t.val le %end_rampup%) = %rate_of_cooling% * forc2x / Tecs * (2020 + t.val - %start_rampup%) / 1e3 ; # 0.1 deg/decade
-background_srm(t)$(2020 + t.val gt %end_rampup% and 2020 + t.val le %start_rampdown%) = %rate_of_cooling% * forc2x / Tecs * (%end_rampup% - %start_rampup%) / 1e3;
-background_srm(t)$(2020 + t.val gt %start_rampdown% and 2020 + t.val le %end_rampdown%) = %rate_of_cooling% * forc2x / Tecs * (%end_rampup% - %start_rampup%) / 1e3 - %rate_of_cooling% * forc2x / Tecs * (2020 + t.val - %start_rampdown%) / 1e3;
-background_srm(t)$(background_srm(t) le 0) = 0;
+forcing_srm(t)$(2020 + t.val ge %start_rampup% and 2020 + t.val le %end_rampup%) = %rate_of_cooling% * forc2x / Tecs * (2020 + t.val - %start_rampup%) / 1e3 ; # 0.1 deg/decade
+forcing_srm(t)$(2020 + t.val gt %end_rampup% and 2020 + t.val le %start_rampdown%) = %rate_of_cooling% * forc2x / Tecs * (%end_rampup% - %start_rampup%) / 1e3;
+forcing_srm(t)$(2020 + t.val gt %start_rampdown% and 2020 + t.val le %end_rampdown%) = %rate_of_cooling% * forc2x / Tecs * (%end_rampup% - %start_rampup%) / 1e3 - %rate_of_cooling% * forc2x / Tecs * (2020 + t.val - %start_rampdown%) / 1e3;
+forcing_srm(t)$(forcing_srm(t) le 0) = 0;
 solve fair using nlp minimizing OBJ;
 
 * set target for experiment with SRM masking (3rd run)
@@ -85,7 +85,7 @@ solve fair using nlp minimizing OBJ;
 execute_unload "%results_folder%/%rcp%_EXP%experiment%pulse_GAS%gas%_ECS%ecs%_TCR%tcr%_PT%pulse_time%_RC%rate_of_cooling%_EC%end_rampdown%_BC%start_rampup%%iltag%_IC%initial_conditions%";
 
 ** Scenario 3: with SRM, with emission pulse and masking
-SRM.lo(t) = - background_srm(t); SRM.up(t) = +inf; # reduce the SAI by at most the full amount
+SRM.lo(t) = - forcing_srm(t); SRM.up(t) = +inf; # reduce the SAI by at most the full amount
 SRM.fx(t)$(t.val lt %pulse_time%) = 0; # and cannot change SAI before the pulse
 
 * solve 3 times as this is the only non-simulation problem

@@ -6,7 +6,7 @@ require(stringr)
 'Launch montecarlo script for SRM substitution pulse analysis
 
 Usage:
-  Generate_montecarlo.R [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--base <main_scenario>] [--angle <angle>] [--method <sampling_method>] [--seed <seed>] [--diagnostics <diagnostics>] [--filter <filter_pct>]
+  Generate_montecarlo.R [-o <res>] [-n <n_scenarios>] [-w <overwrite_data>] [-p <run_parallel>] [-s <start_job>] [-e <end_job>] [--hpc <run_hpc>] [--base <main_scenario>] [--angle <angle>] [--method <sampling_method>] [--seed <seed>] [--diagnostics <diagnostics>] [--filter <filter_pct>] [--lifetime <lifetime>]
 
 Options:
 -o <res>                     Path of the input/outputs
@@ -18,6 +18,7 @@ Options:
 --method <sampling_method>   "sobol" (quasi-random, default) or "montecarlo" (pseudo-random)
 --diagnostics <diagnostics>  T/F write a PDF comparing the drawn vs theoretical distributions (default F)
 --filter <filter_pct>        Cut the upper tail of the log-normal params above this percentile (e.g. 95). Default: off for full MC, 99 for --base=T; use na to disable.
+--lifetime <lifetime>        Emitting-infrastructure lifetime support: "LO:HI" for a log-uniform draw, or a single value to pin it. Default: INFRA_LIFE_LO:INFRA_LIFE_HI from all_parameters.R
 ' -> doc
 
 library(docopt)
@@ -84,6 +85,25 @@ if (length(seed) != 1 || is.na(seed)) stop("--seed must be an integer")
 # Output folder: name is user-specifiable (-o); location is fixed under Sampling/.
 res_name = ifelse(is.null(opts[["o"]]), MC_WORK_DEFAULT, as.character(opts["o"]) )
 res = file.path(MC_WORK_PARENT, res_name)
+
+# Emitting-infrastructure lifetime support. Defaults to the bounds in
+# all_parameters.R, so the shipped default (a single-period pulse) is unchanged
+# unless this is passed. "LO:HI" gives a log-uniform draw on that range; a single
+# value pins every draw to it. Overriding here rather than editing the control
+# file lets a pulse campaign and a variable-lifetime campaign be run from the same
+# configuration, on the same Sobol net, differing only in column 20.
+life_opt = if (is.null(opts[["lifetime"]])) NA_character_ else as.character(opts[["lifetime"]])
+if (is.na(life_opt) || !nzchar(life_opt)) {
+  infra_lo <- INFRA_LIFE_LO; infra_hi <- INFRA_LIFE_HI
+} else {
+  parts <- suppressWarnings(as.numeric(strsplit(str_trim(life_opt), ":", fixed = TRUE)[[1]]))
+  if (length(parts) == 1L) parts <- c(parts, parts)
+  if (length(parts) != 2L || any(is.na(parts)) || any(parts < 1) || parts[1] > parts[2])
+    stop("--lifetime must be 'LO:HI' or a single value, with 1 <= LO <= HI")
+  infra_lo <- parts[1]; infra_hi <- parts[2]
+}
+cat(sprintf("Infrastructure lifetime support: [%g, %g] %s\n", infra_lo, infra_hi,
+            if (infra_lo == infra_hi) "(pinned; single-period pulse at 1)" else "(log-uniform)"))
 sampling_method = ifelse(is.null(opts[["method"]]), SAMPLING_METHOD, as.character(opts["method"]) )
 if (!sampling_method %in% c("sobol","montecarlo")) stop("--method must be 'sobol' or 'montecarlo'")
 
@@ -306,8 +326,8 @@ term_delta_draw <- mc_term_delta(pulse_draw, term_delay, t_horizon)
 # discretizing a continuous support and not a sampling bug. The clamp only guards
 # against the endpoint bins being pushed outside the support by that rounding.
 infra_life_draw <- pmin(pmax(
-  as.integer(round(exp(qunif(unit_draws[,20], log(INFRA_LIFE_LO), log(INFRA_LIFE_HI))))),
-  as.integer(INFRA_LIFE_LO)), as.integer(INFRA_LIFE_HI))
+  as.integer(round(exp(qunif(unit_draws[,20], log(infra_lo), log(infra_hi))))),
+  as.integer(infra_lo)), as.integer(infra_hi))
 
 new_data <- data.frame(
   # --- FAIR-run parameters ---
@@ -507,9 +527,9 @@ if (diagnostics == T) {
   # neighbour's -- that is the theory here, not a defect.
   diag_discrete(new_data$infra_life,
                 function(x) punif(log(pmax(x, .Machine$double.eps)),
-                                  log(INFRA_LIFE_LO), log(INFRA_LIFE_HI)),
+                                  log(infra_lo), log(infra_hi)),
                 1,
-                sprintf("infra_life ~ round(LogUniform(%g,%g)) [yr]", INFRA_LIFE_LO, INFRA_LIFE_HI),
+                sprintf("infra_life ~ round(LogUniform(%g,%g)) [yr]", infra_lo, infra_hi),
                 note = "emitting-infrastructure lifetime; 1 = the classic single-period pulse")
 
   # Termination delay (years of SRM before termination), the quantity the hazard

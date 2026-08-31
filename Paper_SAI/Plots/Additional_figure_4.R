@@ -133,7 +133,7 @@ mean_offdiag <- purrr::pmap_dfr(
       ) %>%
       filter(!is.na(x_bin), !is.na(y_bin)) %>%
       group_by(x_bin, y_bin) %>%
-      summarise(mean_damnorm = mean(metric, na.rm = TRUE), .groups = "drop") %>%
+      summarise(mean_damnorm = median(metric, na.rm = TRUE), .groups = "drop") %>%
       mutate(row_var = factor(input_labels[[row_input]], levels = input_labels),
              col_var = factor(input_labels[[col_input]], levels = input_labels))
   }
@@ -261,7 +261,7 @@ additional_figure_4 <- patchwork::wrap_plots(
         legend.direction = "horizontal")
 
 save_figure(
-  "fig_2_tail_mean_damnorm_matrix.png",
+  "fig_2_tail_median_damnorm_matrix.png",
   additional_figure_4,
   width = 2 + 2 * length(input_order),
   height = 1 + 2 * length(input_order),
