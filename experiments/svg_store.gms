@@ -13,4 +13,11 @@ report('%1',%2,'tatm_ghg',t)     = TATM_GHG.l(t);
 report('%1',%2,'forc_srm',t)     = FORC_SRM.l(t);
 report('%1',%2,'srm',t)          = SRM.l(t);
 report('%1',%2,'qsrm',t)         = Q_SRM.l(t);
+report('%1',%2,'tot_forc',t)     = TOT_FORC.l(t);
 report('%1',%2,'wemi_co2',t)     = W_EMI.l('co2',t);
+
+* Solver outcome of the solve this snapshot belongs to. Recorded rather than
+* aborted on, so one bad state in a loop does not discard the whole run; the
+* analysis drops any scenario that is not (solvestat 1, modelstat 1 or 2).
+solve_status('%1',%2,'solvestat') = fair.solvestat;
+solve_status('%1',%2,'modelstat') = fair.modelstat;

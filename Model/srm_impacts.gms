@@ -1,5 +1,6 @@
 # this modules adds economic impacts to the model
 
+$setglobal srm_angle 10
 
 Variable 
     DAMFRAC_TEMP(t)      "fraction of GDP lost to climate change damages"
@@ -36,7 +37,7 @@ PARAMETER y(t) "GDP at time t"
 
 a0 = 0.00575;
 b0 = 2.0;
-srm_angle = 10;
+srm_angle = %srm_angle%;
 tgtoforc = 0.25 * Tecs;
 vsl0 = 1e-5;
 eta_vsl = 1;
