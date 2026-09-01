@@ -1,6 +1,7 @@
 # this modules adds economic impacts to the model
 
 $setglobal srm_angle 10
+$setglobal mort_srm 26 # thousand deaths per year per 1 Tg of SRM, based on Eastham et al. 2018, range -23,79
 
 Variable 
     DAMFRAC_TEMP(t)      "fraction of GDP lost to climate change damages"
@@ -41,7 +42,7 @@ srm_angle = %srm_angle%;
 tgtoforc = 0.25 * Tecs;
 vsl0 = 1e-5;
 eta_vsl = 1;
-mort_srm = 7e3;
+mort_srm = %mort_srm%*1e3; 
 csrm = 1e-2;
 eff_decline_srm = 0.01;
 
