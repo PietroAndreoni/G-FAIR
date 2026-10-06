@@ -5,6 +5,8 @@ $setglobal mort_srm 26 # thousand deaths per year per 1 Tg of SRM, based on East
 
 Variable 
     DAMFRAC_TEMP(t)      "fraction of GDP lost to climate change damages"
+    WARMING_RATE(t)      "rate of temperature change in degC per decade"
+    DAMFRAC_dTEMP(t)     "fraction of GDP lost to climate change damages due to rate of temperature change"
     DAMFRAC_SRM(t)       "fraction of GDP lost to SRM damages"
     EFF_SRM(t)           "efficiency of SRM in offsetting climate change"
     Q_SRM(t)             "quantity of SRM deployed"
@@ -16,8 +18,10 @@ POSITIVE VARIABLE TOT_FORC, Q_SRM;
 Q_SRM.up(t) = 99;
 
 PARAMETERS 
-a0 "damage function parameter for climate change"
-b0 "damage function exponent for climate change"
+aT "damage function parameter for climate change"
+bT "damage function exponent for climate change"
+adT "damage function parameter for rate of temperature change"
+bdT "damage function exponent for rate of temperature change"
 srm_angle "angle of SRM forcing relative to GHG forcing"
 tgtoforc "SRM forcing per unit of SRM"
 vsl0 "value of statistical life at base year"
@@ -36,8 +40,10 @@ PARAMETER y(t) "GDP at time t"
           g(t) "growth rate of GDP at time t"
           gpop(t) "growth rate of population at time t";
 
-a0 = 0.00575;
-b0 = 2.0;
+aT = 0.00575;
+bT = 2.0;
+adT = 0.0575; # 10 times the value of aT
+bdT = 2.0;
 srm_angle = %srm_angle%;
 tgtoforc = 0.25 * Tecs;
 vsl0 = 1e-5;
@@ -79,6 +85,7 @@ TOT_FORC.l(t) = 3;
 
 EQUATIONS 
 eq_impactcc
+eq_impactvel
 eq_totforcghg
 eq_impactsrm
 eq_effsrm
@@ -87,7 +94,11 @@ eq_mortsrm
 eq_costsrm
 eq_damtot;
 
-eq_impactcc(t)..           DAMFRAC_TEMP(t) =E= a0 * power( TATM(t), b0);
+eq_impactcc(t)..           DAMFRAC_TEMP(t) =E= aT * power( TATM(t), bT);
+
+eq_tvelocity(t,t-1)..      WARMING_RATE(t) =E= (TATM(t) - TATM(t-1)) / tstep * 10; # warming rate in degC per decade
+
+eq_impactvel(t)..          DAMFRAC_DTEMP(t) =E= adT * power( WARMING_RATE(t), bdT);
 
 eq_totforcghg(t)..         TOT_FORC(t) =E= delta + ( sum(cghg, FORCING(cghg,t) ) + forcing_exogenous(t)
                                                     + sqrt( sqr( sum(cghg, FORCING(cghg,t) ) + forcing_exogenous(t) ) + sqr(delta) ) ) / 2;
@@ -102,4 +113,4 @@ eq_mortsrm(t)..            VLL(t) =E= vsl0 * (ypc(t) / ypc0) ** eta_vsl * mort_s
 
 eq_costsrm(t)..            COST_SRM(t) =E= csrm * Q_SRM(t);
 
-eq_damtot(t)..             DAMAGES(t) =E= ( DAMFRAC_TEMP(t) + DAMFRAC_SRM(t) ) * y(t) + VLL(t) + COST_SRM(t);
+eq_damtot(t)..             DAMAGES(t) =E= ( DAMFRAC_TEMP(t) + DAMFRAC_DTEMP(t) + DAMFRAC_SRM(t) ) * y(t) + VLL(t) + COST_SRM(t);
